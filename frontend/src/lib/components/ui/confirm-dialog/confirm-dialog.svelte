@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { AlertDialog as AlertDialogPrimitive } from 'bits-ui';
 	import { buttonVariants } from '$lib/components/ui/button';
+	import { t } from '$lib/i18n';
 	import { cn } from '$lib/utils.js';
 
 	let {
 		open = $bindable(false),
-		title = 'Are you sure?',
+		title,
 		description = '',
-		confirmText = 'Confirm',
-		cancelText = 'Cancel',
+		confirmText,
+		cancelText,
 		destructive = false,
 		onConfirm
 	}: {
@@ -42,7 +43,7 @@
 		>
 			<div class="flex flex-col gap-2">
 				<AlertDialogPrimitive.Title class="text-base font-semibold">
-					{title}
+					{title ?? $t('common.confirmTitle')}
 				</AlertDialogPrimitive.Title>
 				{#if description}
 					<AlertDialogPrimitive.Description class="text-sm text-muted-foreground">
@@ -52,13 +53,13 @@
 			</div>
 			<div class="flex justify-end gap-2">
 				<AlertDialogPrimitive.Cancel class={buttonVariants({ variant: 'outline' })}>
-					{cancelText}
+					{cancelText ?? $t('common.cancel')}
 				</AlertDialogPrimitive.Cancel>
 				<AlertDialogPrimitive.Action
 					class={buttonVariants({ variant: destructive ? 'destructive' : 'default' })}
 					onclick={() => { open = false; onConfirm?.(); }}
 				>
-					{confirmText}
+					{confirmText ?? $t('common.confirm')}
 				</AlertDialogPrimitive.Action>
 			</div>
 		</AlertDialogPrimitive.Content>

@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { t } from '$lib/i18n';
 
 	let email = $state('');
 	let submitting = $state(false);
@@ -16,7 +17,7 @@
 		// Require a valid address up front — otherwise the request silently no-ops
 		// (the endpoint returns the same generic message), which looks broken.
 		if (!isValidEmail(addr)) {
-			error = 'Enter a valid email address first.';
+			error = $t('auth.invalidEmail');
 			return;
 		}
 		error = '';
@@ -30,35 +31,35 @@
 			const data = await res.json().catch(() => ({}));
 			message =
 				data.message ||
-				'If an account with that email exists, a password-reset link is on its way.';
+				$t('auth.forgot.sent');
 		} catch {
-			message = 'If an account with that email exists, a password-reset link is on its way.';
+			message = $t('auth.forgot.sent');
 		} finally {
 			submitting = false;
 		}
 	}
 </script>
 
-<svelte:head><title>Forgot password — Calnode</title></svelte:head>
+<svelte:head><title>{$t('auth.forgot.title')}</title></svelte:head>
 
 <div class="flex min-h-screen items-center justify-center bg-muted/30 p-6">
 	<div class="w-full max-w-sm">
 		<div class="mb-8 text-center">
-			<h1 class="text-xl font-semibold tracking-tight">Forgot your password?</h1>
+			<h1 class="text-xl font-semibold tracking-tight">{$t('auth.forgot.heading')}</h1>
 			<p class="mt-2 text-sm text-muted-foreground">
-				Enter your account email and we'll send you a link to set a new password.
+				{$t('auth.forgot.description')}
 			</p>
 		</div>
 
 		{#if message}
 			<div class="rounded-md bg-green-50 px-3 py-2.5 text-sm text-green-700">{message}</div>
 			<p class="mt-4 text-center text-sm">
-				<a href="/admin/login" class="text-muted-foreground hover:underline">Back to sign in</a>
+				<a href="/admin/login" class="text-muted-foreground hover:underline">{$t('auth.forgot.backToSignIn')}</a>
 			</p>
 		{:else}
 			<form onsubmit={submit} class="space-y-4">
 				<div class="space-y-1.5">
-					<Label for="email">Email</Label>
+					<Label for="email">{$t('auth.email')}</Label>
 					<Input
 						id="email"
 						type="email"
@@ -74,11 +75,11 @@
 					{/if}
 				</div>
 				<Button type="submit" class="h-11 w-full" disabled={submitting}>
-					{submitting ? 'Sending…' : 'Send reset link'}
+					{submitting ? $t('auth.sending') : $t('auth.forgot.submit')}
 				</Button>
 			</form>
 			<p class="mt-4 text-center text-sm">
-				<a href="/admin/login" class="text-muted-foreground hover:underline">Back to sign in</a>
+				<a href="/admin/login" class="text-muted-foreground hover:underline">{$t('auth.forgot.backToSignIn')}</a>
 			</p>
 		{/if}
 	</div>

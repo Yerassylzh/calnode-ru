@@ -59,6 +59,11 @@ func TestCreateBooking_storesAttendeeLocale(t *testing.T) {
 		t.Errorf("language:\"es\" should store locale \"es\", got %q", got)
 	}
 
+	ruID := create("2026-06-20T09:30:00Z", "ru-RU")
+	if got := localeOf(ruID); got != "ru-RU" {
+		t.Errorf("language:\"ru-RU\" should store locale \"ru-RU\", got %q", got)
+	}
+
 	unsupportedID := create("2026-06-20T10:00:00Z", unsupportedLocaleCodes[0])
 	if got := localeOf(unsupportedID); got != "en" {
 		t.Errorf("unsupported language should fall back to English, got %q", got)

@@ -10,6 +10,8 @@
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DemoBanner from '$lib/components/demo-banner.svelte';
+	import LocaleSwitcher from '$lib/components/locale-switcher.svelte';
+	import { t } from '$lib/i18n';
 	import type { Snippet } from 'svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -32,11 +34,20 @@
 		$page.route.id === '/invite/[token]'
 	);
 
+	// label stays the stable English identifier (e.g. the demo-mode nav filter
+	// checks item.label === 'Calendar'); labelKey is what gets displayed.
+	const sectionKeys: Record<string, string> = {
+		Scheduling: 'layout.nav.scheduling',
+		Team: 'layout.nav.team',
+		Developer: 'layout.nav.developer'
+	};
+
 	const navItems = [
 		{
 			section: 'Scheduling',
 			href: `${base}/`,
 			label: 'Home',
+			labelKey: 'layout.nav.home',
 			adminOnly: false,
 			exact: true,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`
@@ -45,6 +56,7 @@
 			section: 'Scheduling',
 			href: `${base}/event-types`,
 			label: 'Event Types',
+			labelKey: 'layout.nav.eventTypes',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`
 		},
@@ -52,6 +64,7 @@
 			section: 'Scheduling',
 			href: `${base}/availability`,
 			label: 'Availability',
+			labelKey: 'layout.nav.availability',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`
 		},
@@ -59,6 +72,7 @@
 			section: 'Scheduling',
 			href: `${base}/bookings`,
 			label: 'Bookings',
+			labelKey: 'layout.nav.bookings',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`
 		},
@@ -66,6 +80,7 @@
 			section: 'Scheduling',
 			href: `${base}/calendar`,
 			label: 'Calendar',
+			labelKey: 'layout.nav.calendar',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="8" y="14" width="2" height="2"/><rect x="13" y="14" width="2" height="2"/></svg>`
 		},
@@ -73,6 +88,7 @@
 			section: 'Team',
 			href: `${base}/recordings`,
 			label: 'Recordings',
+			labelKey: 'layout.nav.recordings',
 			adminOnly: true,
 			requiresFeature: 'recordings',
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`
@@ -81,6 +97,7 @@
 			section: 'Team',
 			href: `${base}/members`,
 			label: 'Members',
+			labelKey: 'layout.nav.members',
 			adminOnly: true,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
 		},
@@ -88,6 +105,7 @@
 			section: 'Team',
 			href: `${base}/teams`,
 			label: 'Teams',
+			labelKey: 'layout.nav.teams',
 			adminOnly: true,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 19a6 6 0 0 0-12 0"/><circle cx="8" cy="9" r="4"/><path d="M22 19a6 6 0 0 0-6-6 4 4 0 1 0-3-7"/></svg>`
 		},
@@ -95,6 +113,7 @@
 			section: 'Developer',
 			href: `${base}/api-keys`,
 			label: 'API Keys',
+			labelKey: 'layout.nav.apiKeys',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>`
 		},
@@ -102,6 +121,7 @@
 			section: 'Developer',
 			href: `${base}/connections`,
 			label: 'Connected apps',
+			labelKey: 'layout.nav.connections',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>`
 		},
@@ -109,6 +129,7 @@
 			section: 'Developer',
 			href: `${base}/webhooks`,
 			label: 'Webhooks',
+			labelKey: 'layout.nav.webhooks',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`
 		},
@@ -116,6 +137,7 @@
 			section: null,
 			href: `${base}/settings`,
 			label: 'Settings',
+			labelKey: 'layout.nav.settings',
 			adminOnly: false,
 			icon: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`
 		}
@@ -183,10 +205,13 @@
 <Toaster position="bottom-right" />
 
 {#if isPublicRoute}
+	<div class="fixed right-3 top-3 z-50">
+		<LocaleSwitcher />
+	</div>
 	{@render children()}
 {:else if checking}
 	<div class="flex h-full items-center justify-center text-sm text-muted-foreground">
-		Loading…
+		{$t('layout.loading')}
 	</div>
 {:else}
 	<div class="flex h-full flex-col">
@@ -220,7 +245,7 @@
 				{#each visibleNavItems as item, i}
 					{#if item.section && item.section !== visibleNavItems[i - 1]?.section}
 						<p class="mb-1 px-2.5 text-xs font-semibold uppercase tracking-wide text-sidebar-foreground/40 first:mt-0 mt-4">
-							{item.section}
+							{$t(sectionKeys[item.section])}
 						</p>
 					{:else if !item.section && visibleNavItems[i - 1]?.section}
 						<div class="my-2 border-t border-sidebar-border"></div>
@@ -236,13 +261,16 @@
 								: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'}"
 					>
 						<span class="shrink-0 {active ? 'opacity-100' : 'opacity-60'}">{@html item.icon}</span>
-						{item.label}
+						{item.labelKey ? $t(item.labelKey) : item.label}
 					</a>
 				{/each}
 			</nav>
 
 			<!-- Footer -->
 			<div class="border-t border-sidebar-border p-2">
+				<div class="px-1 pb-2">
+					<LocaleSwitcher class="w-full" />
+				</div>
 				<button
 					onclick={() => (reportOpen = true)}
 					class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/70"
@@ -250,7 +278,7 @@
 					<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
 						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
 					</svg>
-					Report an issue
+					{$t('layout.reportIssue')}
 				</button>
 				<button
 					onclick={logout}
@@ -261,7 +289,7 @@
 						<polyline points="16 17 21 12 16 7"/>
 						<line x1="21" y1="12" x2="9" y2="12"/>
 					</svg>
-					Sign out
+					{$t('layout.signOut')}
 				</button>
 				{#if version}
 					<a
@@ -288,11 +316,11 @@
 	<Dialog.Root bind:open={reportOpen}>
 		<Dialog.Content class="max-w-md">
 			<Dialog.Header>
-				<Dialog.Title>Report an issue</Dialog.Title>
+				<Dialog.Title>{$t('layout.report.title')}</Dialog.Title>
 				<Dialog.Description>
-					Please <strong>search the existing issues first</strong> — it may already be reported or being
-					worked on. The tracker is for <strong>reproducible bugs</strong> in Calnode; for setup help or
-					“how do I…” questions, please use Discussions instead.
+					{$t('layout.report.please')} <strong>{$t('layout.report.searchFirst')}</strong> {$t('layout.report.mayBeReported')}
+					<strong>{$t('layout.report.reproducibleBugs')}</strong> {$t('layout.report.inCalnode')}
+					{$t('layout.report.howDoI')} {$t('layout.report.questions')}
 				</Dialog.Description>
 			</Dialog.Header>
 			<Dialog.Footer class="gap-2 sm:justify-between">
@@ -303,7 +331,7 @@
 					onclick={() => (reportOpen = false)}
 					class={buttonVariants({ variant: 'outline' })}
 				>
-					Search existing issues
+					{$t('layout.report.searchExisting')}
 				</a>
 				<a
 					href={NEW_ISSUE_URL}
@@ -312,7 +340,7 @@
 					onclick={() => (reportOpen = false)}
 					class={buttonVariants()}
 				>
-					Report a bug
+					{$t('layout.report.reportBug')}
 				</a>
 			</Dialog.Footer>
 		</Dialog.Content>

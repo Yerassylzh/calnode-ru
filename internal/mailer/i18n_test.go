@@ -57,6 +57,46 @@ func TestSendConfirmation_attendeeLocaleTranslatesButHostStaysEnglish(t *testing
 	}
 }
 
+func TestSendConfirmation_attendeeLocaleRussian(t *testing.T) {
+	cap := &captureMailer{}
+	d := testBookingData()
+	d.Locale = i18n.Get("ru-RU")
+	if err := SendConfirmation(context.Background(), cap, d); err != nil {
+		t.Fatalf("SendConfirmation: %v", err)
+	}
+	msgs := cap.all()
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages; want 2", len(msgs))
+	}
+	org, host := msgs[0], msgs[1]
+
+	if !strings.Contains(org.Subject, "Бронирование подтверждено:") {
+		t.Errorf("organizer subject = %q; want Russian", org.Subject)
+	}
+	if !strings.Contains(org.Text, "Здравствуйте, Bob Booker!") {
+		t.Errorf("organizer body missing Russian greeting: %q", org.Text)
+	}
+	if !strings.Contains(org.Text, "Событие:") || !strings.Contains(org.Text, "Организатор:") {
+		t.Errorf("organizer body missing Russian labels: %q", org.Text)
+	}
+	if !strings.Contains(org.HTML, `lang="ru-RU"`) {
+		t.Errorf("organizer HTML missing lang=ru-RU: %q", org.HTML)
+	}
+	if strings.Contains(org.Text, "AM") || strings.Contains(org.Text, "PM") {
+		t.Errorf("organizer body should use a 24h clock in Russian: %q", org.Text)
+	}
+	if !strings.Contains(org.Text, "пн, 15 июнь 2026") {
+		t.Errorf("organizer body missing Russian weekday/month names: %q", org.Text)
+	}
+
+	if !strings.Contains(host.Subject, "New booking") {
+		t.Errorf("host subject = %q; want English regardless of attendee locale", host.Subject)
+	}
+	if !strings.Contains(host.Text, "Hi Alice Host,") {
+		t.Errorf("host body should stay English: %q", host.Text)
+	}
+}
+
 // TestSendConfirmation_nilLocaleDefaultsToEnglish covers the zero-value case (bookings
 // created before locale capture existed, or paths that never set it).
 func TestSendConfirmation_nilLocaleDefaultsToEnglish(t *testing.T) {

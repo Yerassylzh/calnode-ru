@@ -11,6 +11,7 @@
 	import { toast } from 'svelte-sonner';
 	import { saveOnCmdS } from '$lib/save-shortcut';
 	import { createAsyncFlag } from '$lib/async-action.svelte';
+	import { t } from '$lib/i18n';
 
 	type Tracking = {
 		head_html: string;
@@ -22,13 +23,25 @@
 		ga4_measurement_id: string;
 	};
 
-	const fieldLabels: Record<string, string> = {
-		booking_id: 'Booking reference', event_type_slug: 'Event type slug', event_type_name: 'Event type name',
-		start_at: 'Start time', end_at: 'End time', status: 'Status', location: 'Location',
-		host_name: 'Host name', attendee_name: 'Attendee name', attendee_email: 'Attendee email',
-		attendee_timezone: 'Attendee timezone', answers: 'Intake answers',
-		value: 'Revenue / amount', currency: 'Currency', is_paid: 'Paid flag', transaction_id: 'Transaction ID'
+	const trackingFieldLabelKeys: Record<string, string> = {
+		booking_id: 'settingsTracking.fields.booking_id',
+		event_type_slug: 'settingsTracking.fields.event_type_slug',
+		event_type_name: 'settingsTracking.fields.event_type_name',
+		start_at: 'settingsTracking.fields.start_at',
+		end_at: 'settingsTracking.fields.end_at',
+		status: 'settingsTracking.fields.status',
+		location: 'settingsTracking.fields.location',
+		host_name: 'settingsTracking.fields.host_name',
+		attendee_name: 'settingsTracking.fields.attendee_name',
+		attendee_email: 'settingsTracking.fields.attendee_email',
+		attendee_timezone: 'settingsTracking.fields.attendee_timezone',
+		answers: 'settingsTracking.fields.answers',
+		value: 'settingsTracking.fields.value',
+		currency: 'settingsTracking.fields.currency',
+		is_paid: 'settingsTracking.fields.is_paid',
+		transaction_id: 'settingsTracking.fields.transaction_id'
 	};
+
 	const piiFields = new Set(['attendee_name', 'attendee_email', 'attendee_timezone', 'answers']);
 
 	const loadingFlag = createAsyncFlag(true);
@@ -42,15 +55,15 @@
 	let ga4Id = $state('');
 
 	onMount(() => loadingFlag.run(async () => {
-		const t = await api.get<Tracking>('/v1/settings/tracking');
-		headHtml = t.head_html ?? '';
-		cspAllow = t.csp_allow ?? '';
-		dlEnabled = t.datalayer_enabled;
-		dlFields = t.datalayer_fields ?? [];
-		availableFields = t.available_fields ?? [];
-		gtmId = t.gtm_container_id ?? '';
-		ga4Id = t.ga4_measurement_id ?? '';
-	}, 'Could not load tracking settings'));
+		const tr = await api.get<Tracking>('/v1/settings/tracking');
+		headHtml = tr.head_html ?? '';
+		cspAllow = tr.csp_allow ?? '';
+		dlEnabled = tr.datalayer_enabled;
+		dlFields = tr.datalayer_fields ?? [];
+		availableFields = tr.available_fields ?? [];
+		gtmId = tr.gtm_container_id ?? '';
+		ga4Id = tr.ga4_measurement_id ?? '';
+	}, $t('settingsTracking.loadFailed')));
 
 	function toggleField(key: string) {
 		dlFields = dlFields.includes(key) ? dlFields.filter((f) => f !== key) : [...dlFields, key];
@@ -58,7 +71,7 @@
 
 	async function save() {
 		await savingFlag.run(async () => {
-			const t = await api.patch<Tracking>('/v1/settings/tracking', {
+			const tr = await api.patch<Tracking>('/v1/settings/tracking', {
 				head_html: headHtml,
 				csp_allow: cspAllow,
 				datalayer_enabled: dlEnabled,
@@ -66,44 +79,41 @@
 				gtm_container_id: gtmId.trim(),
 				ga4_measurement_id: ga4Id.trim()
 			});
-			dlFields = t.datalayer_fields ?? [];
-			gtmId = t.gtm_container_id ?? '';
-			ga4Id = t.ga4_measurement_id ?? '';
-			toast.success('Tracking settings saved');
-		}, 'Could not save tracking settings');
+			dlFields = tr.datalayer_fields ?? [];
+			gtmId = tr.gtm_container_id ?? '';
+			ga4Id = tr.ga4_measurement_id ?? '';
+			toast.success($t('settingsTracking.saved'));
+		}, $t('settingsTracking.saveFailed'));
 	}
 </script>
 
 <svelte:window onkeydown={saveOnCmdS(save, () => !savingFlag.active)} />
 
 {#if !$currentUser?.is_admin}
-	<p class="text-sm text-muted-foreground">Admin access required.</p>
+	<p class="text-sm text-muted-foreground">{$t('settingsTracking.adminRequired')}</p>
 {:else if loadingFlag.active}
-	<p class="py-8 text-sm text-muted-foreground">Loading…</p>
+	<p class="py-8 text-sm text-muted-foreground">{$t('common.loading')}</p>
 {:else}
 	<div class="max-w-2xl space-y-6">
 		<!-- Native GA4 / GTM -->
 		<div class="rounded-lg border bg-card p-6">
-			<h2 class="text-sm font-semibold">Google Analytics &amp; Tag Manager</h2>
+			<h2 class="text-sm font-semibold">{$t('settingsTracking.googleTitle')}</h2>
 			<p class="mt-0.5 text-xs text-muted-foreground">
-				Enter an ID and Calnode loads the official tag on your booking page automatically — no snippet to
-				paste, and the page's CSP is handled for you. Leave a field blank to turn that tag off.
+				{$t('settingsTracking.googleDescription')}
 			</p>
 			<div class="mt-4 grid gap-4 sm:grid-cols-2">
 				<div class="space-y-1.5">
-					<Label for="gtm-id">GTM Container ID</Label>
+					<Label for="gtm-id">{$t('settingsTracking.gtmLabel')}</Label>
 					<Input id="gtm-id" bind:value={gtmId} placeholder="GTM-XXXXXXX" class="font-mono" />
 					<p class="text-xs text-muted-foreground">
-						Recommended — manages GA4 + Ads tags. Trigger them on the
-						<code class="rounded bg-muted px-1">calnode_booking_confirmed</code> dataLayer event below.
+						{$t('settingsTracking.gtmHint', { event: 'calnode_booking_confirmed' })}
 					</p>
 				</div>
 				<div class="space-y-1.5">
-					<Label for="ga4-id">GA4 Measurement ID</Label>
+					<Label for="ga4-id">{$t('settingsTracking.ga4Label')}</Label>
 					<Input id="ga4-id" bind:value={ga4Id} placeholder="G-XXXXXXXXXX" class="font-mono" />
 					<p class="text-xs text-muted-foreground">
-						Loads GA4 directly. Bookings fire a <code class="rounded bg-muted px-1">purchase</code> /
-						<code class="rounded bg-muted px-1">generate_lead</code> event with revenue.
+						{$t('settingsTracking.ga4Hint', { purchase: 'purchase', lead: 'generate_lead' })}
 					</p>
 				</div>
 			</div>
@@ -111,24 +121,21 @@
 
 		<!-- Code injection -->
 		<div class="rounded-lg border bg-card p-6">
-			<h2 class="text-sm font-semibold">Code injection (head)</h2>
+			<h2 class="text-sm font-semibold">{$t('settingsTracking.injectionTitle')}</h2>
 			<p class="mt-0.5 text-xs text-muted-foreground">
-				Raw HTML/JS injected into the &lt;head&gt; of your public booking and manage pages — for any tag
-				<em>not</em> covered above (Meta Pixel, Plausible, custom). It runs on visitors' browsers; only admins can set it.
+				{$t('settingsTracking.injectionDescription')}
 			</p>
 			<div class="mt-4 space-y-1.5">
-				<Label for="head-html">&lt;head&gt; HTML</Label>
+				<Label for="head-html">{$t('settingsTracking.headLabel')}</Label>
 				<Textarea id="head-html" bind:value={headHtml} rows={8} class="font-mono text-xs"
-					placeholder="<!-- Paste your GTM / GA4 / Meta Pixel snippet here -->" />
+					placeholder={$t('settingsTracking.headPlaceholder')} />
 			</div>
 			<div class="mt-4 space-y-1.5">
-				<Label for="csp-allow">Allowed origins <span class="font-normal text-muted-foreground">(optional)</span></Label>
+				<Label for="csp-allow">{$t('settingsTracking.allowedOrigins')} <span class="font-normal text-muted-foreground">{$t('common.optional')}</span></Label>
 				<Input id="csp-allow" bind:value={cspAllow}
 					placeholder="https://www.googletagmanager.com https://*.google-analytics.com" />
 				<p class="text-xs text-muted-foreground">
-					Leave blank to allow any <code class="rounded bg-muted px-1">https:</code> origin while injection is
-					active — simplest, and GTM-managed tags just work. Fill in to lock the page's CSP to only these
-					origins (space-separated); tags from other domains will then be blocked.
+					{$t('settingsTracking.allowedOriginsHint')}
 				</p>
 			</div>
 		</div>
@@ -137,12 +144,9 @@
 		<div class="rounded-lg border bg-card p-6">
 			<div class="flex items-start justify-between gap-4">
 				<div>
-					<h2 class="text-sm font-semibold">dataLayer events</h2>
+					<h2 class="text-sm font-semibold">{$t('settingsTracking.dataLayerTitle')}</h2>
 					<p class="mt-0.5 text-xs text-muted-foreground">
-						Push <code class="rounded bg-muted px-1">calnode_booking_confirmed</code> /
-						<code class="rounded bg-muted px-1">_cancelled</code> /
-						<code class="rounded bg-muted px-1">_rescheduled</code> into
-						<code class="rounded bg-muted px-1">window.dataLayer</code> so GTM can trigger on them.
+						{$t('settingsTracking.dataLayerDescription', { events: 'calnode_booking_confirmed / _cancelled / _rescheduled' })}
 					</p>
 				</div>
 				<Switch bind:checked={dlEnabled} />
@@ -150,13 +154,13 @@
 			{#if dlEnabled}
 				<div class="mt-4 space-y-2">
 					<p class="text-xs font-medium text-muted-foreground">
-						Fields to include — untick anything you don't want exposed to the browser / GTM.
+						{$t('settingsTracking.fieldsHint')}
 					</p>
 					<div class="grid grid-cols-2 gap-x-4 gap-y-1">
 						{#each availableFields as key}
 							<label class="flex cursor-pointer items-center gap-2 font-mono text-sm">
 								<Checkbox checked={dlFields.includes(key)} onCheckedChange={() => toggleField(key)} />
-								<span>{fieldLabels[key] ?? key}{#if piiFields.has(key)}<span class="ml-1 text-[10px] font-medium uppercase text-amber-600">PII</span>{/if}</span>
+								<span>{trackingFieldLabelKeys[key] ? $t(trackingFieldLabelKeys[key]) : key}{#if piiFields.has(key)}<span class="ml-1 text-[10px] font-medium uppercase text-amber-600">PII</span>{/if}</span>
 							</label>
 						{/each}
 					</div>
@@ -164,6 +168,6 @@
 			{/if}
 		</div>
 
-		<Button onclick={save} disabled={savingFlag.active}>{savingFlag.active ? 'Saving…' : 'Save'}</Button>
+		<Button onclick={save} disabled={savingFlag.active}>{savingFlag.active ? $t('common.saving') : $t('common.save')}</Button>
 	</div>
 {/if}

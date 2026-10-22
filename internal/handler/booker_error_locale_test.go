@@ -69,6 +69,34 @@ func TestBookerFacingErrors_translated(t *testing.T) {
 		}
 	})
 
+	t.Run("required intake field russian", func(t *testing.T) {
+		h, apiKey, _ := setupWorkspace(t)
+		slug, _ := seedEventTypeHTTP(t, h, apiKey)
+		seedFullAvailability(t, h, apiKey)
+
+		qrec := httptest.NewRecorder()
+		qreq := authReq(http.MethodPost, "/v1/event-types/"+slug+"/questions",
+			`{"label":"Компания","type":"text","required":true}`, apiKey)
+		qreq.SetPathValue("slug", slug)
+		h.RequireAuth(h.CreateQuestion)(qrec, qreq)
+		if qrec.Code != http.StatusCreated {
+			t.Fatalf("create question: %d — %s", qrec.Code, qrec.Body.String())
+		}
+
+		body := fmt.Sprintf(`{"event_type_slug":%q,"start_at":"2027-05-03T10:00:00Z","name":"Иван","email":"ivan@example.com","timezone":"UTC","language":"ru-RU"}`, slug)
+		req := httptest.NewRequest(http.MethodPost, "/v1/bookings", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.CreateBooking(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d; want 400 — %s", rec.Code, rec.Body.String())
+		}
+		got := errorOf(t, rec)
+		if !strings.Contains(got, "не заполнено обязательное поле") {
+			t.Errorf("error = %q; want the Russian required-field message", got)
+		}
+	})
+
 	t.Run("invalid select option", func(t *testing.T) {
 		h, apiKey, _ := setupWorkspace(t)
 		slug, _ := seedEventTypeHTTP(t, h, apiKey)

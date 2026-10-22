@@ -1,0 +1,33 @@
+import * as core from './core';
+import * as home from './home';
+import * as auth from './auth';
+import * as bookings from './bookings';
+import * as calendar from './calendar';
+import * as eventTypes from './eventTypes';
+import * as eventTypeDetail from './eventTypeDetail';
+import * as questionsPanel from './questionsPanel';
+import * as embedPanel from './embedPanel';
+import * as availability from './availability';
+import * as members from './members';
+import * as teams from './teams';
+import * as recordings from './recordings';
+import * as apiKeys from './apiKeys';
+import * as connections from './connections';
+import * as webhooks from './webhooks';
+import * as settingsLayout from './settingsLayout';
+import * as settingsProfile from './settingsProfile';
+import * as settingsBranding from './settingsBranding';
+import * as settingsEmail from './settingsEmail';
+import * as settingsGoogle from './settingsGoogle';
+import * as settingsVideo from './settingsVideo';
+import * as settingsZoom from './settingsZoom';
+import * as settingsStorage from './settingsStorage';
+import * as settingsPayments from './settingsPayments';
+import * as settingsNotifications from './settingsNotifications';
+import * as settingsAI from './settingsAI';
+import * as settingsTracking from './settingsTracking';
+import * as shared from './shared';
+
+export const en = Object.assign({}, core.en, home.en, auth.en, bookings.en, calendar.en, eventTypes.en, eventTypeDetail.en, questionsPanel.en, embedPanel.en, availability.en, members.en, teams.en, recordings.en, apiKeys.en, connections.en, webhooks.en, settingsLayout.en, settingsProfile.en, settingsBranding.en, settingsEmail.en, settingsGoogle.en, settingsVideo.en, settingsZoom.en, settingsStorage.en, settingsPayments.en, settingsNotifications.en, settingsAI.en, settingsTracking.en, shared.en);
+
+export const ru = Object.assign({}, core.ru, home.ru, auth.ru, bookings.ru, calendar.ru, eventTypes.ru, eventTypeDetail.ru, questionsPanel.ru, embedPanel.ru, availability.ru, members.ru, teams.ru, recordings.ru, apiKeys.ru, connections.ru, webhooks.ru, settingsLayout.ru, settingsProfile.ru, settingsBranding.ru, settingsEmail.ru, settingsGoogle.ru, settingsVideo.ru, settingsZoom.ru, settingsStorage.ru, settingsPayments.ru, settingsNotifications.ru, settingsAI.ru, settingsTracking.ru, shared.ru);

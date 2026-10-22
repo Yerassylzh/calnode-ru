@@ -57,6 +57,25 @@ func TestPatchBranding_fallbackLocale_setsAndPersists(t *testing.T) {
 	}
 }
 
+func TestPatchBranding_fallbackLocale_setsAndPersistsRussian(t *testing.T) {
+	h, apiKey, _ := setupWorkspace(t)
+	preq := authReq(http.MethodPatch, "/v1/settings/branding", `{"fallback_locale":"ru-RU"}`, apiKey)
+	prec := httptest.NewRecorder()
+	h.RequireAuth(h.PatchBranding)(prec, preq)
+	if prec.Code != http.StatusOK {
+		t.Fatalf("patch: %d — %s", prec.Code, prec.Body.String())
+	}
+
+	greq := authReq(http.MethodGet, "/v1/settings/branding", "", apiKey)
+	grec := httptest.NewRecorder()
+	h.RequireAuth(h.GetBranding)(grec, greq)
+	var resp map[string]any
+	json.Unmarshal(grec.Body.Bytes(), &resp) //nolint:errcheck
+	if resp["fallback_locale"] != "ru-RU" {
+		t.Errorf("fallback_locale after patch = %v; want \"ru-RU\"", resp["fallback_locale"])
+	}
+}
+
 // TestBookPage_respectsFallbackLocale is the end-to-end path: a visitor whose browser
 // asks for a language Calnode doesn't support gets the operator's configured
 // fallback (Spanish here), not the hardcoded English default.

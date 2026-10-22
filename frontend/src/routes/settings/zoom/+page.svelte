@@ -8,6 +8,7 @@
 	import { toast } from 'svelte-sonner';
 	import { saveOnCmdS } from '$lib/save-shortcut';
 	import { createAsyncFlag } from '$lib/async-action.svelte';
+	import { t } from '$lib/i18n';
 
 	const loadingFlag = createAsyncFlag(true);
 	const savingFlag = createAsyncFlag();
@@ -21,7 +22,7 @@
 	onMount(() => loadingFlag.run(async () => {
 		settings = await api.get<ZoomSettings>('/v1/settings/zoom');
 		clientID = settings.client_id;
-	}, 'Could not load Zoom settings'));
+	}, $t('settingsZoom.loadFailed')));
 
 	async function save() {
 		await savingFlag.run(async () => {
@@ -29,63 +30,55 @@
 			if (clientSecret) body.client_secret = clientSecret;
 			settings = await api.patch<ZoomSettings>('/v1/settings/zoom', body);
 			clientSecret = '';
-			toast.success('Saved — each host can now connect Zoom from the Calendar page');
-		}, 'Could not save Zoom settings');
+			toast.success($t('settingsZoom.saved'));
+		}, $t('settingsZoom.saveFailed'));
 	}
 </script>
 
 <svelte:window onkeydown={saveOnCmdS(save, () => !savingFlag.active)} />
 
 {#if !$currentUser?.is_admin}
-	<p class="text-sm text-muted-foreground">Admin access required.</p>
+	<p class="text-sm text-muted-foreground">{$t('settingsZoom.adminRequired')}</p>
 {:else}
 
 {#if loadingFlag.active}
-	<p class="py-8 text-sm text-muted-foreground">Loading…</p>
+	<p class="py-8 text-sm text-muted-foreground">{$t('common.loading')}</p>
 {:else}
 	<div class="max-w-lg space-y-4">
 
 		{#if !settings?.configured}
 		<div class="rounded-lg border bg-card p-6">
-			<h2 class="mb-4 text-sm font-semibold">Setup instructions</h2>
+			<h2 class="mb-4 text-sm font-semibold">{$t('settingsZoom.instructionsTitle')}</h2>
 			<ol class="space-y-4 text-sm">
 				<li class="flex gap-3">
 					<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">1</span>
 					<div>
-						Go to the <a href="https://marketplace.zoom.us" target="_blank" rel="noopener noreferrer" class="font-medium text-primary underline">Zoom App Marketplace</a>
-						and sign in with your Zoom account. Click <span class="font-medium">Develop → Build App</span>.
+						{$t('settingsZoom.step1Part1')}<a href="https://marketplace.zoom.us" target="_blank" rel="noopener noreferrer" class="font-medium text-primary underline">{$t('settingsZoom.step1Link')}</a>{$t('settingsZoom.step1Part2')}<span class="font-medium">{$t('settingsZoom.step1Develop')}</span>{$t('settingsZoom.step1Part3')}
 					</div>
 				</li>
 				<li class="flex gap-3">
 					<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">2</span>
 					<div>
-						Choose a <span class="font-medium">General App</span> (User-managed OAuth). While it is
-						unpublished, Zoom only lets users <span class="font-medium">inside the Zoom account that owns
-						the app</span> connect; hosts with their own separate Zoom accounts need a published app
-						(see DEPLOY.md, "Zoom meeting links"). If that rules Zoom out, built-in video needs no
-						Zoom app at all — see <a href="https://github.com/Calnode/calnode/blob/main/docs/VIDEO.md" target="_blank" rel="noopener noreferrer" class="font-medium text-primary underline">docs/VIDEO.md</a>.
+						{$t('settingsZoom.step2Part1')}<span class="font-medium">{$t('settingsZoom.step2GeneralApp')}</span>{$t('settingsZoom.step2Part2')}<span class="font-medium">{$t('settingsZoom.step2AccountOwner')}</span>{$t('settingsZoom.step2Part3')}<a href="https://github.com/Calnode/calnode/blob/main/docs/VIDEO.md" target="_blank" rel="noopener noreferrer" class="font-medium text-primary underline">docs/VIDEO.md</a>.
 					</div>
 				</li>
 				<li class="flex gap-3">
 					<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">3</span>
 					<div>
-						Under <span class="font-medium">OAuth</span>, set the <span class="font-medium">Redirect URL for OAuth</span>
-						(and add it to the allow list) to:
+						{$t('settingsZoom.step3Part1')}<span class="font-medium">{$t('settingsZoom.step3OAuth')}</span>{$t('settingsZoom.step3Part2')}<span class="font-medium">{$t('settingsZoom.step3RedirectUrl')}</span>{$t('settingsZoom.step3Part3')}
 						<code class="mt-1 block rounded bg-muted px-2 py-1 text-xs font-mono break-all">{redirectURI}</code>
 					</div>
 				</li>
 				<li class="flex gap-3">
 					<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">4</span>
 					<div>
-						Under <span class="font-medium">Scopes</span>, add <code class="rounded bg-muted px-1">meeting:write</code>
-						(create/update/delete meetings on the user's behalf).
+						{$t('settingsZoom.step4Part1')}<span class="font-medium">{$t('settingsZoom.step4Scopes')}</span>{$t('settingsZoom.step4Part2')}<code class="rounded bg-muted px-1">meeting:write</code>{$t('settingsZoom.step4Part3')}
 					</div>
 				</li>
 				<li class="flex gap-3">
 					<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">5</span>
 					<div>
-						Copy the <span class="font-medium">Client ID</span> and <span class="font-medium">Client Secret</span>
-						from the app's Basic Information, paste them below, and save.
+						{$t('settingsZoom.step5Part1')}<span class="font-medium">{$t('settingsZoom.step5ClientId')}</span>{$t('settingsZoom.step5And')}<span class="font-medium">{$t('settingsZoom.step5ClientSecret')}</span>{$t('settingsZoom.step5Part2')}
 					</div>
 				</li>
 			</ol>
@@ -95,56 +88,52 @@
 		<div class="rounded-lg border bg-card p-6">
 			<div class="mb-4 flex items-start justify-between gap-2">
 				<div>
-					<h2 class="text-sm font-semibold">Zoom</h2>
+					<h2 class="text-sm font-semibold">{$t('settingsZoom.title')}</h2>
 					<p class="mt-0.5 text-xs text-muted-foreground">
-						Lets each host connect their own Zoom account so Zoom-located bookings get a real
-						meeting link minted automatically.
+						{$t('settingsZoom.description')}
 					</p>
 				</div>
 				{#if settings !== null}
 					<span class="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium {settings.configured ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}">
 						<span class="h-1.5 w-1.5 rounded-full {settings.configured ? 'bg-green-500' : 'bg-amber-400'}"></span>
-						{settings.configured ? 'Configured' : 'Not configured'}
+						{settings.configured ? $t('settingsZoom.configured') : $t('settingsZoom.notConfigured')}
 					</span>
 				{/if}
 			</div>
 
 			<div class="space-y-3">
 				<div class="space-y-1.5">
-					<Label for="z-client-id">Client ID</Label>
+					<Label for="z-client-id">{$t('settingsZoom.clientId')}</Label>
 					<Input id="z-client-id" type="text" placeholder="abcdEFGhij-KLmnOPqrS" bind:value={clientID} />
 				</div>
 				<div class="space-y-1.5">
-					<Label for="z-client-secret">Client Secret</Label>
+					<Label for="z-client-secret">{$t('settingsZoom.clientSecret')}</Label>
 					<Input id="z-client-secret" type="password"
-						placeholder={settings?.client_secret_set ? '•••••••• (stored)' : 'Enter client secret'}
+						placeholder={settings?.client_secret_set ? $t('settingsEmail.placeholderStored') : $t('settingsZoom.enterClientSecret')}
 						bind:value={clientSecret} />
 					{#if settings?.client_secret_set && !clientSecret}
-						<p class="text-xs text-muted-foreground">Stored — leave blank to keep it.</p>
+						<p class="text-xs text-muted-foreground">{$t('settingsZoom.storedKeep')}</p>
 					{/if}
 				</div>
 			</div>
 
 			{#if settings?.configured}
 				<div class="mt-5 border-t pt-4">
-					<p class="text-xs font-medium text-muted-foreground">Redirect URL</p>
+					<p class="text-xs font-medium text-muted-foreground">{$t('settingsZoom.redirectUrlTitle')}</p>
 					<p class="mt-0.5 text-xs text-muted-foreground">
-						This must be registered on your Zoom app (OAuth → Redirect URL + OAuth allow list).
+						{$t('settingsZoom.redirectUrlHint')}
 					</p>
 					<code class="mt-2 block rounded bg-muted px-2 py-1 text-xs font-mono break-all">{redirectURI}</code>
 				</div>
 				<div class="mt-4 rounded-md bg-amber-50 px-3 py-2.5 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
-					<span class="font-medium">Multi-member limit:</span> only Zoom users on the same Zoom
-					account as this app's owner can connect an unpublished app — members elsewhere are
-					refused by Zoom before Calnode is involved. Options:
-					<a href="https://github.com/Calnode/calnode/blob/main/docs/ZOOM.md" target="_blank" rel="noopener noreferrer" class="font-medium underline">docs/ZOOM.md</a>
-					(built-in video needs no Zoom app at all).
+					<span class="font-medium">{$t('settingsZoom.limitWarningBold')}</span>{$t('settingsZoom.limitWarningText')}
+					<a href="https://github.com/Calnode/calnode/blob/main/docs/ZOOM.md" target="_blank" rel="noopener noreferrer" class="font-medium underline">docs/ZOOM.md</a>{$t('settingsZoom.limitWarningBuiltin')}
 				</div>
 			{/if}
 
 			<div class="mt-5">
 				<Button onclick={save} disabled={savingFlag.active}>
-					{savingFlag.active ? 'Saving…' : 'Save'}
+					{savingFlag.active ? $t('common.saving') : $t('common.save')}
 				</Button>
 			</div>
 		</div>

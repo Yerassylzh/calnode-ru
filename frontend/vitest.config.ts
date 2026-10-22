@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 // page. This is what lets us assert *computed styles* in a real browser, which
 // is the only thing that catches a missing/wrong @custom-variant.
 export default defineConfig({
+	server: { host: '127.0.0.1', port: 51730 },
 	plugins: [tailwindcss(), svelte()],
 	resolve: {
 		alias: {
@@ -21,6 +22,7 @@ export default defineConfig({
 		include: ['src/**/*.{test,spec}.{js,ts}'],
 		browser: {
 			enabled: true,
+			api: { port: 51730 },
 			provider: playwright(),
 			headless: true,
 			instances: [{ browser: 'chromium' }]

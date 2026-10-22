@@ -36,6 +36,8 @@ func TestResolve(t *testing.T) {
 	}{
 		{"exact es", "es", "", "es"},
 		{"exact en", "en-US,en;q=0.9", "", "en"},
+		{"exact ru-RU", "ru-RU,ru;q=0.9", "", "ru-RU"},
+		{"plain ru matches ru-RU", "ru", "", "ru-RU"},
 		{"regional subtag falls back to primary", "es-MX,es;q=0.9", "", "es"},
 		// fr-CA is shipped as its own file, so a Canadian browser gets Canadian French
 		// rather than the France copy — and a French browser is unaffected by its
@@ -44,6 +46,7 @@ func TestResolve(t *testing.T) {
 		{"European French is unaffected by fr-CA", "fr-FR,fr;q=0.9", "", "fr"},
 		{"plain fr is unaffected by fr-CA", "fr", "", "fr"},
 		{"fr-CA can be selected by the ?lang override", "en", "fr-CA", "fr-CA"},
+		{"ru-RU can be selected by the ?lang override", "en", "ru-RU", "ru-RU"},
 		{"unsupported language falls back to English", "ja-JP,ja;q=0.9", "", "en"},
 		{"empty header falls back to English", "", "", "en"},
 		{"garbage header falls back to English", "not a real header ;;;", "", "en"},
@@ -208,6 +211,12 @@ func TestTf(t *testing.T) {
 	if got := Get("es").Tf("calendar_event_summary", "30-Minute Call", "Bob Booker"); got != "30-Minute Call con Bob Booker" {
 		t.Errorf("Tf(calendar_event_summary) = %q", got)
 	}
+	if got := Get("ru-RU").Tf("calendar_event_summary", "30-Minute Call", "Bob Booker"); got != "30-Minute Call — Bob Booker" {
+		t.Errorf("Russian Tf(calendar_event_summary) = %q", got)
+	}
+	if got := Get("ru-RU").Tf("calendar_event_booking_id", "01J4TEST"); got != "ID бронирования: 01J4TEST" {
+		t.Errorf("Russian Tf(calendar_event_booking_id) = %q", got)
+	}
 	if got := Default().Tf("calendar_event_booking_id", "01J4TEST"); got != "Booking ID: 01J4TEST" {
 		t.Errorf("Tf(calendar_event_booking_id) = %q", got)
 	}
@@ -245,6 +254,9 @@ func TestFormatDateTime(t *testing.T) {
 	if got := Get("es").FormatDateTime(moment); got != "lun 22 jun 2026, 09:05" {
 		t.Errorf("Spanish FormatDateTime = %q", got)
 	}
+	if got := Get("ru-RU").FormatDateTime(moment); got != "пн, 22 июнь 2026, 09:05" {
+		t.Errorf("Russian FormatDateTime = %q", got)
+	}
 
 	// Hour cycle follows the locale's clock_format, not a hardcoded 12-hour default —
 	// this is the actual review-flagged bug: emails must agree with the page, which
@@ -255,6 +267,9 @@ func TestFormatDateTime(t *testing.T) {
 	}
 	if got := Get("es").FormatTimeOfDay(afternoon); got != "15:30" {
 		t.Errorf("Spanish FormatTimeOfDay = %q, want 24h clock", got)
+	}
+	if got := Get("ru-RU").FormatTimeOfDay(afternoon); got != "15:30" {
+		t.Errorf("Russian FormatTimeOfDay = %q, want 24h clock", got)
 	}
 }
 

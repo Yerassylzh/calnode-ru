@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store';
+import { localeTag } from '$lib/i18n';
 import type { User } from './api';
 
 export interface UserPrefs {
@@ -38,7 +39,7 @@ function fmtDatePart(date: Date, format: 'dmy' | 'mdy' | 'ymd'): string {
 export function fmtDateTime(iso: string, p: UserPrefs = get(prefs)): string {
 	const date = new Date(iso);
 	const datePart = fmtDatePart(date, p.date_format);
-	const timePart = date.toLocaleTimeString(undefined, {
+	const timePart = date.toLocaleTimeString(get(localeTag), {
 		hour: '2-digit',
 		minute: '2-digit',
 		hour12: p.time_format === '12h'
@@ -55,7 +56,7 @@ export function fmtDate(ymd: string, p: UserPrefs = get(prefs)): string {
 }
 
 export function fmtTime(iso: string, p: UserPrefs = get(prefs)): string {
-	return new Date(iso).toLocaleTimeString(undefined, {
+	return new Date(iso).toLocaleTimeString(get(localeTag), {
 		hour: '2-digit',
 		minute: '2-digit',
 		hour12: p.time_format === '12h'
@@ -63,6 +64,15 @@ export function fmtTime(iso: string, p: UserPrefs = get(prefs)): string {
 }
 
 export const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Full weekday names in the selected UI locale (CLDR order, Monday-first not
+// assumed — index 0 is always Sunday to match UserPrefs.week_start numbering).
+export function weekDayNames(): string[] {
+	const tag = get(localeTag);
+	// 2024-01-07 was a Sunday; formatting consecutive days gives Sun..Sat.
+	const names = new Intl.DateTimeFormat(tag, { weekday: 'long', timeZone: 'UTC' });
+	return Array.from({ length: 7 }, (_, i) => names.format(new Date(Date.UTC(2024, 0, 7 + i))));
+}
 
 export const TIMEZONES = [
 	'Pacific/Auckland',
