@@ -10,7 +10,7 @@ import (
 	"github.com/calnode/calnode/internal/booking"
 )
 
-// RescheduleBooking handles PATCH /v1/bookings/{id}/reschedule (admin — host only).
+// RescheduleBooking handles PATCH /v1/bookings/{id}/reschedule (admin or primary host).
 // Body: {"start_at":"<RFC3339>"}
 // end_at is computed from the event type's duration_minutes.
 func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +53,7 @@ func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Return 404 for unauthorized access to avoid leaking booking IDs.
-	if hostID != user.ID {
+	if !user.IsAdmin && hostID != user.ID {
 		h.writeError(w, http.StatusNotFound, "booking not found")
 		return
 	}

@@ -1,0 +1,330 @@
+{
+  "name": "Calnode — reschedule_booking (webhook)",
+  "nodes": [
+    {
+      "id": "reschedule-webhook",
+      "name": "reschedule_booking",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "authentication": "none",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "prepare-reschedule",
+      "name": "Prepare reschedule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const BASE_URL = 'https://emdeu-calnode.usekvi.com';\nconst DEFAULT_TIMEZONE = 'Asia/Qyzylorda';\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nfunction invalid(message) { return [{ json: { proceed: false, http_status: 400, response: { success: false, message } } }]; }\nconst input = $input.first().json.body;\nif (!input || typeof input !== 'object' || Array.isArray(input)) return invalid('Передайте JSON-объект с записью и новым временем.');\nconst allowed = new Set(['booking_id', 'manage_url', 'date', 'time', 'start_at', 'timezone']);\nfor (const [key, value] of Object.entries(input)) {\n  if (!allowed.has(key)) return invalid(`Неизвестное поле: ${key}`);\n  if (value != null && typeof value !== 'string') return invalid(`${key} должен быть строкой.`);\n}\nconst text = value => (value ?? '').trim();\nconst timezone = text(input.timezone) || DEFAULT_TIMEZONE;\nif (!DateTime.now().setZone(timezone).isValid) return invalid('Некорректный часовой пояс.');\nconst bookingID = text(input.booking_id);\nconst manageURL = text(input.manage_url);\nif (Boolean(bookingID) === Boolean(manageURL)) return invalid('Укажите ровно одно поле: booking_id ИЛИ manage_url.');\nconst base = BASE_URL.replace(/\\/$/, '');\nconst escapedBase = base.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\nconst managePattern = new RegExp('^' + escapedBase + '/manage/([a-f0-9]{64})/?$', 'i');\nlet url;\nif (manageURL) {\n  const match = managePattern.exec(manageURL);\n  if (!match) return invalid('manage_url должна быть исходной личной ссылкой Calnode из результата создания или последнего переноса записи.');\n  url = base + '/manage/' + match[1] + '/reschedule';\n} else {\n  if (!uuid.test(bookingID)) return invalid('booking_id должен быть UUID записи из get_bookings.');\n  url = base + '/v1/bookings/' + encodeURIComponent(bookingID) + '/reschedule';\n}\nconst date = text(input.date), time = text(input.time), startAt = text(input.start_at);\nif (startAt && (date || time)) return invalid('Передайте date/time ИЛИ start_at, не оба варианта.');\nlet target;\nif (startAt) {\n  if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(startAt)) return invalid('start_at должен содержать дату, время с секундами и часовой пояс.');\n  target = DateTime.fromISO(startAt, { setZone: true });\n} else {\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !/^(?:[01]\\d|2[0-3])-[0-5]\\d$|^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d)?$/.test(time)) return invalid('Укажите date в формате YYYY-MM-DD и time в формате HH-MM (24 часа), например 15-30.');\n  target = DateTime.fromISO(date + 'T' + time.replace('-', ':'), { zone: timezone });\n}\nif (!target.isValid) return invalid('Некорректная дата или время.');\nif (target.toMillis() <= Date.now()) return invalid('Новое время записи должно быть в будущем.');\nreturn [{ json: {\n  proceed: true, use_manage_url: Boolean(manageURL), mode: manageURL ? 'manage' : 'host_api',\n  booking_id: bookingID || null, base_url: base, timezone, target_ms: target.toMillis(), url,\n  body: { start_at: target.toUTC().toISO({ suppressMilliseconds: true }) }\n} }];\n"
+      }
+    },
+    {
+      "id": "valid-reschedule",
+      "name": "Input valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid-reschedule-condition",
+              "leftValue": "={{ $json.proceed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "reschedule-mode",
+      "name": "Use manage URL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "reschedule-mode-condition",
+              "leftValue": "={{ $json.use_manage_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "reschedule-manage",
+      "name": "Reschedule using manage link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "none"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "reschedule-host",
+      "name": "Reschedule as primary host",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        20
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $json.url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "format-reschedule",
+      "name": "Format reschedule response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const config = $('Prepare reschedule').first().json;\nconst result = $input.first().json;\nfunction reply(status, response) { return [{ json: { http_status: status, response } }]; }\nfunction fail(status, message, code) { return reply(status, { success: false, message, code, ...(config.booking_id ? { booking_id: config.booking_id } : {}) }); }\nconst status = Number(result.statusCode);\nif (!Number.isInteger(status) || status < 100 || status > 599) return fail(502, 'Не удалось подтвердить перенос. Проверьте время через get_bookings перед повторной попыткой.', 'RESCHEDULE_UNCONFIRMED');\nlet body = result.body;\nif (typeof body === 'string') {\n  try { body = JSON.parse(body); } catch { return fail(502, 'Calnode вернул некорректный ответ. Проверьте время через get_bookings.', 'INVALID_API_RESPONSE'); }\n}\nif (status < 200 || status >= 300) {\n  let message;\n  if (status === 401 || status === 403) message = 'Недостаточно прав. Для переноса по booking_id нужен API-ключ администратора или основного специалиста.';\n  else if (status === 404) message = config.mode === 'manage'\n    ? 'Личная ссылка недействительна или устарела. Используйте ссылку из последнего успешного переноса; если предыдущий запрос прервался, сначала проверьте время через get_bookings.'\n    : 'Запись не найдена или ключ принадлежит другому специалисту. Используйте ключ администратора, основного специалиста либо сохранённую manage_url.';\n  else if (status === 409) message = body?.error === 'this booking has been cancelled' ? 'Отменённую запись нельзя перенести.' : 'Выбранное время недоступно. Выберите другой слот.';\n  else if (status === 429) message = 'Слишком много запросов. Повторите попытку позже.';\n  else message = typeof body?.error === 'string' ? body.error : 'Не удалось перенести запись.';\n  return fail(status >= 400 && status <= 599 ? status : 502, message, typeof body?.code === 'string' ? body.code : 'RESCHEDULE_FAILED');\n}\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nif (typeof body?.id !== 'string' || !uuid.test(body.id) || (config.booking_id && body.id !== config.booking_id) || !['confirmed', 'rescheduled'].includes(body.status)) return fail(502, 'Calnode не подтвердил перенос нужной записи. Проверьте её состояние.', 'RESCHEDULE_UNCONFIRMED');\nconst start = DateTime.fromISO(body.start_at ?? '', { setZone: true });\nconst end = DateTime.fromISO(body.end_at ?? '', { setZone: true });\nif (!start.isValid || !end.isValid || start.toMillis() !== config.target_ms || end.toMillis() <= start.toMillis()) return fail(502, 'Calnode не подтвердил новое время записи. Проверьте её через get_bookings.', 'RESCHEDULE_UNCONFIRMED');\nconst escapedBase = config.base_url.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\nconst validManageURL = typeof body.manage_url === 'string' && new RegExp('^' + escapedBase + '/manage/[a-f0-9]{64}$', 'i').test(body.manage_url);\nif (config.mode === 'manage' && !validManageURL) return fail(502, 'Время записи изменено, но Calnode не вернул новую личную ссылку. Сохраните запись и обратитесь к администратору за доступом.', 'MANAGE_LINK_MISSING');\nconst localStart = start.setZone(config.timezone), localEnd = end.setZone(config.timezone);\nreturn reply(200, {\n  success: true, message: 'Запись перенесена.',\n  booking: {\n    booking_id: body.id, status: 'Подтверждена',\n    date: localStart.toFormat('dd.MM.yyyy'), time: localStart.toFormat('HH:mm'), end_time: localEnd.toFormat('HH:mm'),\n    ...(localStart.toISODate() !== localEnd.toISODate() ? { end_date: localEnd.toFormat('dd.MM.yyyy') } : {}),\n    timezone: config.timezone,\n    ...(validManageURL ? { manage_url: body.manage_url } : {})\n  },\n  ...(config.mode === 'manage' ? { message: 'Запись перенесена. Сохраните новую manage_url — предыдущая ссылка больше не действует.' } : {})\n});\n"
+      }
+    },
+    {
+      "id": "respond-reschedule",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1440,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "reschedule-help",
+      "name": "Setup instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -480
+      ],
+      "parameters": {
+        "width": 1160,
+        "height": 340,
+        "content": "## reschedule_booking\nWebhook Authentication = None. No fixed path or webhookId is exported. Use the URL n8n generates; if your import leaves Path blank, replace only the trigger with a fresh Webhook and reconnect it to Prepare reschedule (POST, Respond using Respond to Webhook node).\n\nStandard request: POST {\"booking_id\":\"UUID from get_bookings\",\"date\":\"2026-11-03\",\"time\":\"15-30\"}. Time is HH-MM in 24-hour format, interpreted in Asia/Qyzylorda automatically. Select your ADMIN Bearer credential on Reschedule as primary host. Deploy the updated backend first.\n\nAlternative: POST {\"booking_id\":\"UUID from get_bookings\",\"date\":\"2026-11-03\",\"time\":\"15:00\"}. Select an ADMIN Bearer credential on Reschedule as primary host to reschedule bookings across all specialists. Regular member credentials can reschedule only their own bookings. Deploy the updated Calnode backend first.\n\nExactly one of manage_url / booking_id. Supply date + time OR start_at with offset. timezone defaults to Asia/Qyzylorda. Existing specialist, answers and contacts are preserved. No appointments are cancelled/recreated.\n\nThe webhook is unauthenticated as requested. No credentials or private booking tokens are bundled. See reschedule-booking/README.md."
+      }
+    }
+  ],
+  "connections": {
+    "reschedule_booking": {
+      "main": [
+        [
+          {
+            "node": "Prepare reschedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare reschedule": {
+      "main": [
+        [
+          {
+            "node": "Input valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input valid?": {
+      "main": [
+        [
+          {
+            "node": "Use manage URL?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use manage URL?": {
+      "main": [
+        [
+          {
+            "node": "Reschedule using manage link",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reschedule as primary host",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reschedule using manage link": {
+      "main": [
+        [
+          {
+            "node": "Format reschedule response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reschedule as primary host": {
+      "main": [
+        [
+          {
+            "node": "Format reschedule response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format reschedule response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 60
+  },
+  "pinData": {},
+  "tags": []
+}

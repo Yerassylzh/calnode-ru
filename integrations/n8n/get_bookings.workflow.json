@@ -1,0 +1,246 @@
+{
+  "name": "Calnode — get_bookings (webhook)",
+  "nodes": [
+    {
+      "id": "get-bookings-webhook",
+      "name": "get_bookings",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "calnode/get_bookings",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "87a70670-2e63-4bb6-b65c-bd41e2fbf853"
+    },
+    {
+      "id": "prepare-request",
+      "name": "Prepare request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Change only these defaults if needed. Never put an API key in this code.\nconst BASE_URL = 'https://emdeu-calnode.usekvi.com';\nconst DEFAULT_TIMEZONE = 'Asia/Qyzylorda';\nconst PAGE_SIZE = 200;\n\nfunction invalid(message) {\n  return [{ json: { proceed: false, http_status: 400, response: { success: false, error: { code: 'INVALID_INPUT', message } } } }];\n}\nconst input = $input.first().json.body ?? {};\nif (!input || typeof input !== 'object' || Array.isArray(input)) return invalid('Send a JSON object.');\nconst allowed = new Set(['date', 'from', 'to', 'when', 'status', 'timezone', 'event_slug', 'event_type_slug', 'phone', 'contact_phone', 'name', 'specialist_id', 'host_id', 'offset']);\nfor (const key of Object.keys(input)) if (!allowed.has(key)) return invalid(`Unsupported filter: ${key}`);\nfor (const [key, value] of Object.entries(input)) {\n  if (key !== 'offset' && value != null && typeof value !== 'string') return invalid(`${key} must be a string.`);\n}\nconst text = value => String(value ?? '').trim();\nconst timezone = text(input.timezone) || DEFAULT_TIMEZONE;\nif (!DateTime.now().setZone(timezone).isValid) return invalid('Invalid timezone.');\nconst event = text(input.event_type_slug) || text(input.event_slug);\nconst host = text(input.specialist_id) || text(input.host_id);\nif (text(input.event_type_slug) && text(input.event_slug) && input.event_type_slug !== input.event_slug) return invalid('Event slug aliases disagree.');\nif (text(input.specialist_id) && text(input.host_id) && input.specialist_id !== input.host_id) return invalid('Specialist ID aliases disagree.');\nlet phone = text(input.contact_phone) || text(input.phone);\nif (phone) {\n  if (phone.length > 64 || !/^\\+[0-9 ().-]+$/.test(phone)) return invalid('Phone must be international, e.g. +77011234567.');\n  phone = phone.replace(/[ ().-]/g, '');\n  if (!/^\\+[1-9]\\d{6,14}$/.test(phone)) return invalid('Phone must contain + and 7–15 digits.');\n}\nconst name = text(input.name);\nconst offset = input.offset == null ? 0 : Number(input.offset);\nif (!Number.isSafeInteger(offset) || offset < 0) return invalid('offset must be a non-negative integer.');\nif (input.offset != null && !['string', 'number'].includes(typeof input.offset)) return invalid('offset must be a number.');\nconst date = text(input.date);\nif (date && (text(input.from) || text(input.to))) return invalid('Use date OR from/to, not both.');\nconst from = date || text(input.from);\nconst to = date || text(input.to);\nlet lower = null, upper = null;\nfor (const [key, value] of [['from', from], ['to', to]]) {\n  if (!value) continue;\n  const parsed = DateTime.fromISO(value, { zone: timezone });\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value) || !parsed.isValid) return invalid(`${key} must be a valid YYYY-MM-DD date.`);\n  if (key === 'from') lower = parsed.startOf('day');\n  else upper = parsed.plus({ days: 1 }).startOf('day');\n}\nif (lower && upper && lower.toMillis() >= upper.toMillis()) return invalid('from must not be later than to.');\nconst when = text(input.when) || (from || to ? 'all' : 'upcoming');\nif (!['upcoming', 'past', 'all'].includes(when)) return invalid('when must be upcoming, past, or all.');\nconst status = text(input.status);\nif (status && !['confirmed', 'cancelled', 'rescheduled'].includes(status)) return invalid('status must be confirmed, cancelled, or rescheduled.');\nconst query = { scope: 'all', limit: PAGE_SIZE, offset, order: 'asc' };\nif (event) query.event_type = event;\nif (host) query.host = host;\nif (status) query.status = status;\nif (when !== 'all') query.when = when;\n// Calnode uses UTC calendar dates for from/to. Fetch a covering interval,\n// then enforce the precise local-day bounds after collecting API pages.\nif (lower) query.from = lower.toUTC().toISODate();\nif (upper) query.to = upper.toUTC().toISODate();\nconst queryString = Object.entries(query).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&');\nreturn [{ json: {\n  proceed: true,\n  url: BASE_URL.replace(/\\/$/, '') + '/v1/bookings?' + queryString,\n  timezone, page_size: PAGE_SIZE, offset,\n  local_from_ms: lower?.toMillis() ?? null,\n  local_to_ms: upper?.toMillis() ?? null,\n  filters: { event_type_slug: event || null, specialist_id: host || null, phone: phone || null, name: name || null, when, status: status || null, from: from || null, to: to || null }\n} }];\n"
+      }
+    },
+    {
+      "id": "input-valid",
+      "name": "Input valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "get-input-valid",
+              "leftValue": "={{ $json.proceed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "get-calnode-bookings",
+      "name": "Get bookings from Calnode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "offset",
+                    "value": "={{ $(\"Prepare request\").first().json.offset + $pageCount * $(\"Prepare request\").first().json.page_size }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || !Array.isArray($response.body.items) || $response.body.items.length < $(\"Prepare request\").first().json.page_size }}",
+              "limitPagesFetched": true,
+              "maxRequests": 10,
+              "requestInterval": 100
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "format-get-bookings",
+      "name": "Format bookings response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const config = $('Prepare request').first().json;\nconst pages = $input.all();\nfunction reply(status, response) { return [{ json: { http_status: status, response } }]; }\nfunction fail(status, code, message) { return reply(status, { success: false, error: { code, message } }); }\nlet raw = [], lastLength = 0;\nfor (const page of pages) {\n  const result = page.json;\n  const status = Number(result.statusCode);\n  if (!Number.isInteger(status)) return fail(502, 'CALNODE_UNAVAILABLE', 'Не удалось получить ответ от Calnode.');\n  let body = result.body;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch { return fail(502, 'INVALID_API_RESPONSE', 'Calnode вернул некорректный ответ.'); }\n  }\n  if (status < 200 || status >= 300) {\n    return fail(status >= 400 && status <= 599 ? status : 502, body?.code || 'GET_BOOKINGS_FAILED', typeof body?.error === 'string' ? body.error : 'Не удалось получить записи.');\n  }\n  if (!Array.isArray(body?.items)) return fail(502, 'INVALID_API_RESPONSE', 'В ответе Calnode отсутствует список записей.');\n  lastLength = body.items.length;\n  raw.push(...body.items);\n}\nif (!pages.length) return fail(502, 'EMPTY_API_RESPONSE', 'Calnode не вернул ответ.');\nconst normalizePhone = value => String(value ?? '').replace(/[ ().-]/g, '');\nconst seen = new Set();\nconst bookings = [];\nfor (const booking of raw) {\n  if (!booking.id || seen.has(booking.id)) continue;\n  seen.add(booking.id);\n  const start = DateTime.fromISO(booking.start_at, { setZone: true });\n  if (!start.isValid) return fail(502, 'INVALID_API_RESPONSE', 'Calnode вернул некорректное время записи.');\n  if (config.local_from_ms != null && start.toMillis() < config.local_from_ms) continue;\n  if (config.local_to_ms != null && start.toMillis() >= config.local_to_ms) continue;\n  const attendees = Array.isArray(booking.attendees) ? booking.attendees : [];\n  if (config.filters.phone && !attendees.some(a => normalizePhone(a.phone) === config.filters.phone)) continue;\n  if (config.filters.name && !attendees.some(a => String(a.name ?? '').toLocaleLowerCase('ru-RU').includes(config.filters.name.toLocaleLowerCase('ru-RU')))) continue;\n  const end = DateTime.fromISO(booking.end_at, { setZone: true });\n  if (!end.isValid) return fail(502, 'INVALID_API_RESPONSE', 'Calnode вернул некорректное время записи.');\n  bookings.push({\n    id: booking.id,\n    event_type_slug: booking.event_type_slug ?? null,\n    status: booking.status,\n    specialist_id: booking.host_id,\n    specialist_name: booking.host_name ?? null,\n    start_at: booking.start_at,\n    end_at: booking.end_at,\n    local_date: start.setZone(config.timezone).toISODate(),\n    local_time: start.setZone(config.timezone).toFormat('HH:mm'),\n    local_end_time: end.setZone(config.timezone).toFormat('HH:mm'),\n    timezone: config.timezone,\n    location: booking.location_value ?? null,\n    attendees: attendees.map(a => ({ name: a.name ?? '', phone: a.phone ?? '', email: a.email ?? '', contact_method: a.contact_method ?? (a.phone ? 'phone' : 'email') }))\n  });\n}\n// A full last page might have another page. Never claim this is a complete search.\nconst complete = lastLength < config.page_size;\nreturn reply(200, {\n  success: true, tool: 'get_bookings', count: bookings.length, complete,\n  message: complete ? (bookings.length ? 'Записи найдены.' : 'По указанным фильтрам записей не найдено.') : 'Получена часть записей. Продолжите поиск с next_offset.',\n  bookings,\n  pagination: { scanned: raw.length, pages: pages.length, offset: config.offset, next_offset: complete ? null : config.offset + pages.length * config.page_size },\n  filters: config.filters\n});\n"
+      }
+    },
+    {
+      "id": "respond-get-bookings",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1200,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "get-bookings-help",
+      "name": "Setup instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -470
+      ],
+      "parameters": {
+        "width": 1040,
+        "height": 330,
+        "content": "## get_bookings — setup\n1. Select a Header Auth credential on the Webhook (for example X-Calnode-Tool-Key).\n2. Select your Calnode Bearer credential on Get bookings from Calnode. Use an admin/owner key for all specialists.\n3. Check BASE_URL and timezone in Prepare request. No secrets are included in this export.\n4. Publish/activate and call the Production URL shown by n8n.\n\nExample POST body:\n`{\"phone\":\"+77011234567\",\"event_slug\":\"rodionova_60_min\",\"date\":\"2026-11-02\"}`\n\nAll filters optional. Empty body lists upcoming, non-cancelled bookings. Dates use Asia/Qyzylorda unless timezone is supplied. status=cancelled lists cancellations. when=all includes past/upcoming, not cancellations unless explicitly selected.\n\nFetches up to 10 pages of 200 bookings. If complete=false, repeat with the same filters and pagination.next_offset as offset. No procedure answers or private manage URLs are returned. See get-bookings/README.md."
+      }
+    }
+  ],
+  "connections": {
+    "get_bookings": {
+      "main": [
+        [
+          {
+            "node": "Prepare request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare request": {
+      "main": [
+        [
+          {
+            "node": "Input valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input valid?": {
+      "main": [
+        [
+          {
+            "node": "Get bookings from Calnode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get bookings from Calnode": {
+      "main": [
+        [
+          {
+            "node": "Format bookings response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format bookings response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 60
+  },
+  "pinData": {},
+  "tags": []
+}

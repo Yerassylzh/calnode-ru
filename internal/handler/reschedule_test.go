@@ -142,6 +142,62 @@ func TestRescheduleBooking_updatesReminderJob(t *testing.T) {
 // Wrong user: booking belongs to another host
 // ---------------------------------------------------------------------------
 
+func TestRescheduleBooking_permissions(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		admin     bool
+		otherHost bool
+		want      int
+	}{
+		{"admin can reschedule another host", true, true, http.StatusOK},
+		{"member cannot reschedule another host", false, true, http.StatusNotFound},
+		{"member can reschedule own booking", false, false, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, database, key, userID := setupWorkspaceWithDB(t)
+			slug, _ := seedEventTypeHTTP(t, h, key)
+			originalStart := futureAt(10, 10, 0)
+			newStart := futureAt(11, 14, 0)
+			bookingID := createBookingViaHTTP(t, h, slug, originalStart.Format(time.RFC3339))
+			hostID := userID
+			if tc.otherHost {
+				hostID = "other-host"
+				if _, err := database.Exec(`INSERT INTO users (id,email,name,iana_timezone,is_admin) VALUES (?,'other@example.com','Other','UTC',0)`, hostID); err != nil {
+					t.Fatal(err)
+				}
+				seedFullAvailabilityDB(t, database, hostID)
+				if _, err := database.Exec(`UPDATE bookings SET host_id=? WHERE id=?`, hostID, bookingID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := database.Exec(`UPDATE booking_hosts SET user_id=? WHERE booking_id=? AND user_id=?`, hostID, bookingID, userID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !tc.admin {
+				if _, err := database.Exec(`UPDATE users SET is_admin=0 WHERE id=?`, userID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rec := patchReschedule(t, h, bookingID, newStart.Format(time.RFC3339), key)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d; want %d: %s", rec.Code, tc.want, rec.Body)
+			}
+			var storedHost, storedStart string
+			if err := database.QueryRow(`SELECT host_id,start_at FROM bookings WHERE id=?`, bookingID).Scan(&storedHost, &storedStart); err != nil {
+				t.Fatal(err)
+			}
+			wantStart := originalStart
+			if tc.want == http.StatusOK {
+				wantStart = newStart
+			}
+			parsedStart, err := time.Parse(time.RFC3339Nano, storedStart)
+			if err != nil || !parsedStart.Equal(wantStart) || storedHost != hostID {
+				t.Fatalf("stored host/time = %s/%s; want %s/%s", storedHost, storedStart, hostID, wantStart)
+			}
+		})
+	}
+}
+
 func TestRescheduleBooking_wrongUser(t *testing.T) {
 	h, _, key1, _ := setupWorkspaceWithDB(t)
 

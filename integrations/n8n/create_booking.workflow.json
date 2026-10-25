@@ -1,0 +1,335 @@
+{
+  "name": "Calnode — create_booking (webhook)",
+  "nodes": [
+    {
+      "id": "create-webhook",
+      "name": "create_booking",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "calnode/create_booking",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "f25f2747-b7e0-4c44-9897-719d75b0082a"
+    },
+    {
+      "id": "validate-input",
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// n8n Code node: Run Once for All Items. Edit these deployment defaults after import.\nconst CONFIG = {\n  base_url: 'https://emdeu-calnode.usekvi.com',\n  timezone: 'Asia/Qyzylorda',\n  language: 'ru-RU',\n};\nconst fail = message => [{ json: { proceed: false, http_status: 400, response: { success: false, error: { code: 'invalid_input', message } } } }];\nconst input = $input.first().json;\nconst body = input.body;\nif (!body || typeof body !== 'object' || Array.isArray(body)) return fail('Send a JSON object in the request body.');\nconst fields = ['event_type_slug', 'start_at', 'name', 'contact_phone', 'procedure', 'notes', 'timezone', 'language', 'request_id'];\nfor (const field of Object.keys(body)) if (!fields.includes(field)) return fail('Unsupported field: ' + field);\nconst text = {};\nfor (const field of fields) {\n  if (body[field] !== undefined && body[field] !== null && typeof body[field] !== 'string') return fail(field + ' must be a string.');\n  text[field] = (body[field] || '').trim();\n}\nfor (const field of ['event_type_slug', 'start_at', 'name', 'contact_phone', 'procedure']) if (!text[field]) return fail(field + ' is required.');\nif (text.event_type_slug.length > 200 || /[\\s/?#\\\\]/.test(text.event_type_slug)) return fail('event_type_slug must be an event slug, not a URL.');\nif (text.name.length > 200 || text.procedure.length > 2000 || text.notes.length > 8000) return fail('Name, procedure, or notes exceed the supported length.');\nif (text.contact_phone.length > 64 || !/^\\+[0-9 ().-]+$/.test(text.contact_phone)) return fail('contact_phone must include + and country code, e.g. +77011234567.');\nconst phone = text.contact_phone.replace(/[ ().-]/g, '');\nif (!/^\\+[1-9]\\d{6,14}$/.test(phone)) return fail('contact_phone must contain + followed by 7–15 digits.');\nconst date = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.\\d{1,9})?(Z|[+-](\\d{2}):(\\d{2}))$/.exec(text.start_at);\nif (!date || !Number.isFinite(Date.parse(text.start_at))) return fail('start_at must be RFC3339 with timezone, e.g. 2026-11-02T09:00:00+05:00.');\nconst [, year, month, day, hour, minute, second, , offsetHour = '0', offsetMinute = '0'] = date;\nconst maxDay = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();\nif (+month < 1 || +month > 12 || +day < 1 || +day > maxDay || +hour > 23 || +minute > 59 || +second > 59 || +offsetHour > 23 || +offsetMinute > 59) return fail('start_at contains an invalid calendar date or time.');\nconst timezone = text.timezone || CONFIG.timezone;\ntry { new Intl.DateTimeFormat('en', { timeZone: timezone }); } catch { return fail('timezone must be a supported IANA timezone, e.g. Asia/Qyzylorda.'); }\nconst requestID = String(input.headers?.['idempotency-key'] || text.request_id).trim();\nif (!requestID || requestID.length > 200 || /[\\x00-\\x1f\\x7f]/.test(requestID)) return fail('Send a stable request_id or Idempotency-Key header (1–200 characters), reused for retries of this booking.');\nif (text.request_id && input.headers?.['idempotency-key'] && text.request_id !== requestID) return fail('request_id and Idempotency-Key must match when both are supplied.');\nreturn [{ json: {\n  proceed: true,\n  base_url: CONFIG.base_url.replace(/\\/$/, ''),\n  idempotency_key: 'n8n:create_booking:' + requestID,\n  booking: {\n    event_type_slug: text.event_type_slug,\n    start_at: new Date(text.start_at).toISOString(),\n    name: text.name,\n    contact_method: 'phone',\n    contact_phone: phone,\n    timezone,\n    language: text.language || CONFIG.language,\n  },\n  procedure: text.procedure,\n  notes: text.notes,\n} }];\n"
+      }
+    },
+    {
+      "id": "valid-input",
+      "name": "Input valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid-input-condition",
+              "leftValue": "={{ $json.proceed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "load-questions",
+      "name": "Get event questions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.base_url + \"/v1/event-types/\" + encodeURIComponent($json.booking.event_type_slug) + \"/questions\" }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "map-questions",
+      "name": "Map booking questions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// n8n Code node. Required procedure and optional notes are resolved per event.\nconst input = $('Validate input').first().json;\nconst upstream = $input.first().json;\nconst fail = (http_status, code, message) => [{ json: { proceed: false, http_status, response: { success: false, error: { code, message } } } }];\nconst status = Number(upstream.statusCode);\nif (status === 404) return fail(404, 'event_type_not_found', 'The event type is missing, inactive, or private.');\nif (status !== 200 || !Array.isArray(upstream.body?.items)) return fail(502, 'questions_unavailable', 'Could not load booking questions from Calnode. Retry the same request with the same request_id.');\nconst questions = upstream.body.items;\nconst required = questions.filter(q => q.required === true);\nconst optional = questions.filter(q => q.required === false);\nif (questions.length !== 2 || required.length !== 1 || optional.length !== 1 || !['text', 'select'].includes(required[0].type) || optional[0].type !== 'text' || typeof required[0].id !== 'string' || typeof optional[0].id !== 'string' || !required[0].id || !optional[0].id || required[0].id === optional[0].id) {\n  return fail(422, 'question_configuration_error', 'Expected exactly two event questions: one required procedure (text/dropdown) and one optional notes (text). Check this event configuration in Calnode.');\n}\nconst procedure = required[0];\nif (procedure.type === 'select' && (!Array.isArray(procedure.options) || !procedure.options.includes(input.procedure))) return fail(400, 'invalid_procedure', 'procedure must exactly match a configured dropdown option.');\nconst answers = [{ question_id: procedure.id, value: input.procedure }];\nif (input.notes) answers.push({ question_id: optional[0].id, value: input.notes });\nreturn [{ json: { proceed: true, base_url: input.base_url, idempotency_key: input.idempotency_key, booking: { ...input.booking, answers } } }];\n"
+      }
+    },
+    {
+      "id": "ready-to-book",
+      "name": "Ready to book?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ready-to-book-condition",
+              "leftValue": "={{ $json.proceed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "create-booking",
+      "name": "Create in Calnode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.base_url + \"/v1/bookings\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.idempotency_key }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.booking) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "format-result",
+      "name": "Format booking result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// n8n Code node. Never report a payment hold or uncertain network result as confirmed.\nconst upstream = $input.first().json;\nconst status = Number(upstream.statusCode);\nconst body = upstream.body;\nconst fail = (http_status, code, message, retryable = false) => [{ json: { http_status, response: { success: false, error: { code, message, retryable } } } }];\nif (!Number.isInteger(status) || !body || typeof body !== 'object' || Array.isArray(body)) return fail(502, 'calnode_unreachable', 'Calnode did not return a usable response. The booking outcome may be unknown. Retry the identical request with the same request_id; do not generate a new ID.', true);\nif (status === 201 && typeof body.id === 'string' && body.id && body.status === 'confirmed') {\n  return [{ json: { http_status: 201, response: { success: true, status: 'confirmed', booking: {\n    id: body.id,\n    event_type_id: body.event_type_id,\n    start_at: body.start_at,\n    end_at: body.end_at,\n    contact_method: body.contact_method || 'phone',\n    host_id: body.host_id,\n    hosts: Array.isArray(body.hosts) ? body.hosts : [],\n    location_type: body.location_type || '',\n    location_value: body.location_value || '',\n    manage_url: body.manage_url || '',\n  } } } }];\n}\nif (status === 200 && body.payment_required === true && typeof body.checkout_url === 'string' && body.checkout_url) return [{ json: { http_status: 202, response: { success: true, status: 'payment_required', booking_id: body.booking_id, checkout_url: body.checkout_url } } }];\nconst codes = { 400: 'invalid_booking', 404: 'event_type_not_found', 409: 'slot_unavailable_or_request_in_progress', 422: 'booking_limit_or_request_conflict', 429: 'rate_limited', 503: 'booking_service_unavailable' };\nif (codes[status]) return fail(status, codes[status], typeof body.error === 'string' ? body.error : 'Calnode rejected the booking request.', status === 429 || status === 503);\nreturn fail(502, 'calnode_error', 'Calnode did not confirm the booking. For a transient failure, retry the identical request with the same request_id.', status >= 500);\n"
+      }
+    },
+    {
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1920,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "create_booking": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Input valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input valid?": {
+      "main": [
+        [
+          {
+            "node": "Get event questions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get event questions": {
+      "main": [
+        [
+          {
+            "node": "Map booking questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map booking questions": {
+      "main": [
+        [
+          {
+            "node": "Ready to book?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready to book?": {
+      "main": [
+        [
+          {
+            "node": "Create in Calnode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create in Calnode": {
+      "main": [
+        [
+          {
+            "node": "Format booking result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format booking result": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 60
+  },
+  "pinData": {},
+  "tags": []
+}
