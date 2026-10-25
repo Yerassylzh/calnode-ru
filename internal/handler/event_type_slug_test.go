@@ -65,6 +65,36 @@ func TestPatchEventType_renamesWhileUnbooked(t *testing.T) {
 	}
 }
 
+func TestPatchEventType_preservesUnderscores(t *testing.T) {
+	h, apiKey, _ := setupWorkspace(t)
+	slug, _ := seedEventTypeHTTP(t, h, apiKey)
+
+	for _, newSlug := range []string{"rodionova-25-min", "rodionova_25_min", "rodionova__25_min"} {
+		code, body := patchSlug(t, h, apiKey, slug, newSlug)
+		if code != http.StatusOK || body["slug"] != newSlug {
+			t.Fatalf("rename %q to %q: %d - %v", slug, newSlug, code, body)
+		}
+
+		req := authReq(http.MethodGet, "/v1/event-types/"+newSlug, "", apiKey)
+		req.SetPathValue("slug", newSlug)
+		rec := httptest.NewRecorder()
+		h.RequireAuth(h.GetEventType)(rec, req)
+		var saved map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &saved); err != nil {
+			t.Fatalf("read saved event: %v", err)
+		}
+		if rec.Code != http.StatusOK || saved["slug"] != newSlug {
+			t.Fatalf("saved slug %q: %d - %v", newSlug, rec.Code, saved)
+		}
+		slug = newSlug
+	}
+
+	bookOnce(t, h, slug)
+	if code, body := patchSlug(t, h, apiKey, slug, slug); code != http.StatusOK || body["slug"] != slug {
+		t.Fatalf("resubmit booked underscore slug: %d - %v", code, body)
+	}
+}
+
 // A booking means the URL demonstrably reached someone, so the rename is refused rather
 // than silently breaking their manage link.
 func TestPatchEventType_refusesRenameOnceBooked(t *testing.T) {

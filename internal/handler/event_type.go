@@ -820,10 +820,10 @@ func (h *Handler) PatchEventType(w http.ResponseWriter, r *http.Request) {
 	// booker's confirmation email still resolves through the slug.
 	effectiveSlug := slug
 	if req.Slug != nil {
-		newSlug := slugify(*req.Slug)
+		newSlug := normalizeSlug(*req.Slug, true)
 		if newSlug == "" {
 			h.writeError(w, http.StatusBadRequest,
-				"slug cannot be empty (letters and digits only, joined by hyphens)")
+				"slug cannot be empty (use letters, digits, hyphens or underscores)")
 			return
 		}
 		if newSlug != slug {

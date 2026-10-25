@@ -15,12 +15,17 @@ import (
 // slugify normalises a string into a URL-safe slug: lowercase, alphanumeric
 // runs joined by single hyphens, no leading/trailing hyphens.
 func slugify(s string) string {
+	return normalizeSlug(s, false)
+}
+
+// normalizeSlug optionally preserves underscores for event booking URLs.
+func normalizeSlug(s string, preserveUnderscores bool) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	var b strings.Builder
 	lastHyphen := false
 	for _, r := range s {
 		switch {
-		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || (preserveUnderscores && r == '_'):
 			b.WriteRune(r)
 			lastHyphen = false
 		case r == ' ' || r == '-' || r == '_':
