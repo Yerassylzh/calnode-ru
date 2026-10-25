@@ -205,9 +205,12 @@ body {
           </select>
         </div>
         <div class="field contact-phone-field">
-          <label for="f-contact-phone">{{call .T "contact_phone_label"}}</label>
-          <input id="f-contact-phone" name="contact_phone" type="tel" maxlength="64" autocomplete="tel" inputmode="tel" placeholder="+77011234567" aria-describedby="contact-hint">
-          <p id="contact-hint" class="contact-hint" role="tooltip">{{call .T "contact_phone_hint"}}</p>
+          <div class="contact-label-row">
+            <label for="f-contact-phone">{{call .T "contact_phone_label"}}</label>
+            <button type="button" class="contact-info" aria-label="{{call .T "contact_phone_label"}}" aria-describedby="contact-hint">i</button>
+            <p id="contact-hint" class="contact-hint" role="tooltip">{{call .T "contact_phone_hint"}}</p>
+          </div>
+          <input id="f-contact-phone" name="contact_phone" type="tel" maxlength="64" autocomplete="tel" inputmode="tel" placeholder="+77011234567">
         </div>
         {{if .PriceLabel}}<p class="sub">{{call .T "contact_paid_notice"}}</p>{{end}}
         <div class="field">
@@ -262,7 +265,7 @@ body {
         <h3>{{call .T "booking_confirmed"}}</h3>
         <p class="when" id="confirm-time"></p>
         <p class="sub" id="contact-confirmation">{{call .T "contact_saved_notice"}}</p>
-        <a id="booking-manage-link" class="btn-primary hidden" rel="noreferrer">{{call .T "contact_manage_link"}}</a>
+        <a id="booking-manage-link" class="btn-primary confirm-manage-link hidden" rel="noreferrer">{{call .T "contact_manage_link"}}</a>
       </div>
     </div>
 

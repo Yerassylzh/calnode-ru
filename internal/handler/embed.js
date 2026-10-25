@@ -590,7 +590,7 @@
       var name = el('input', { type: 'text', required: 'required', autocomplete: 'name', placeholder: t(this.i18n, 'name_placeholder') });
       var email = el('input', { id: 'contact-email', type: 'email', autocomplete: 'email', placeholder: t(this.i18n, 'email_placeholder') });
       form.appendChild(el('div', { class: 'field' }, [el('label', { text: t(this.i18n, 'name_label') }), name]));
-      var contactPhone = el('input', { id: 'contact-phone', type: 'tel', maxlength: '64', autocomplete: 'tel', inputmode: 'tel', placeholder: '+77011234567', 'aria-describedby': 'contact-hint' });
+      var contactPhone = el('input', { id: 'contact-phone', type: 'tel', maxlength: '64', autocomplete: 'tel', inputmode: 'tel', placeholder: '+77011234567' });
       var contactMethod = el('select', { id: 'contact-method' });
       var policy = this.info.booking_contact_policy || 'email_or_phone';
       if (policy !== 'email_only') contactMethod.appendChild(el('option', { value: 'phone', text: t(this.i18n, 'contact_phone_option') }));
@@ -606,7 +606,12 @@
       }
       contactMethod.addEventListener('change', syncContact);
       form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-method', text: t(this.i18n, 'contact_method_label') }), contactMethod]));
-      form.appendChild(el('div', { class: 'field contact-phone-field' }, [el('label', { for: 'contact-phone', text: t(this.i18n, 'contact_phone_label') }), contactPhone, el('p', { id: 'contact-hint', class: 'contact-hint', role: 'tooltip', text: t(this.i18n, 'contact_phone_hint') })]));
+      var phoneLabel = el('div', { class: 'contact-label-row' }, [
+        el('label', { for: 'contact-phone', text: t(this.i18n, 'contact_phone_label') }),
+        el('button', { type: 'button', class: 'contact-info', 'aria-label': t(this.i18n, 'contact_phone_label'), 'aria-describedby': 'contact-hint', text: 'i' }),
+        el('p', { id: 'contact-hint', class: 'contact-hint', role: 'tooltip', text: t(this.i18n, 'contact_phone_hint') }),
+      ]);
+      form.appendChild(el('div', { class: 'field contact-phone-field' }, [phoneLabel, contactPhone]));
       form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-email', text: t(this.i18n, 'email_label') }), email]));
       syncContact();
       if (this.info.price_cents > 0) form.appendChild(el('p', { class: 'sub', text: t(this.i18n, 'contact_paid_notice') }));
@@ -688,7 +693,7 @@
           el('h3', { text: t(this.i18n, 'booking_confirmed') }),
           el('p', { class: 'when', text: shortDay(slot.start, this.locale) + ' · ' + timeLabel(slot.start, this.locale) }),
           el('p', { class: 'sub', text: t(this.i18n, 'contact_saved_notice') }),
-          ...(this.manageURL ? [el('a', { href: this.manageURL, rel: 'noreferrer', text: t(this.i18n, 'contact_manage_link') })] : []),
+          ...(this.manageURL ? [el('a', { class: 'btn-primary confirm-manage-link', href: this.manageURL, rel: 'noreferrer', text: t(this.i18n, 'contact_manage_link') })] : []),
         ]),
       ]);
     }

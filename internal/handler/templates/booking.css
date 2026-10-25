@@ -226,6 +226,15 @@
 .slot-label { font-size: .875rem; font-weight: 600; color: #111827; margin-bottom: 1.25rem; }
 .field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .75rem; }
 .contact-phone-field { position: relative; }
+.contact-label-row { display: flex; align-items: center; gap: .35rem; }
+.contact-info {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; flex-shrink: 0;
+  border: 1px solid #9ca3af; border-radius: 50%;
+  background: transparent; color: #6b7280;
+  font: 600 11px/1 Georgia, serif; cursor: help;
+}
+.contact-info:focus-visible { outline: 2px solid #6b7280; outline-offset: 2px; }
 .contact-hint {
   position: absolute;
   top: calc(100% + 6px);
@@ -245,8 +254,8 @@
   opacity: 0;
   transition: opacity .15s;
 }
-.contact-phone-field:hover .contact-hint,
-.contact-phone-field:focus-within .contact-hint { visibility: visible; opacity: 1; }
+.contact-info:hover + .contact-hint,
+.contact-info:focus + .contact-hint { visibility: visible; opacity: 1; }
 .field label { font-size: .75rem; font-weight: 500; color: #6b7280; }
 .field input {
   padding: .55rem .75rem;
@@ -312,7 +321,12 @@
 }
 .confirm-view h3 { font-size: 1rem; font-weight: 700; margin-bottom: .375rem; }
 .confirm-view .when { font-size: .875rem; font-weight: 600; color: #111827; margin-bottom: .25rem; }
-.confirm-view .sub { font-size: .8125rem; color: #6b7280; }
+.confirm-view .sub { font-size: .8125rem; color: #6b7280; line-height: 1.5; margin: 0; }
+.confirm-view .confirm-manage-link {
+  display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box; width: 100%; margin-top: 1rem;
+  text-align: center; text-decoration: none; line-height: 1.4;
+}
 
 /* Avatar */
 .avatar-img {
