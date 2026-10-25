@@ -170,7 +170,7 @@
   "directory_team_subtitle": "Book time with the %s team",
   "contact_method_label": "Primary contact",
   "contact_phone_label": "Phone number",
-  "contact_phone_hint": "Use international format, e.g. +77011234567. Optional email receives invitations; SMS is not sent.",
+  "contact_phone_hint": "Use international format, e.g. +77011234567. SMS is not sent.",
   "contact_phone_option": "Phone number",
   "contact_email_option": "Email",
   "contact_saved_notice": "Save your private manage link to view meeting details, reschedule, or cancel. SMS is not sent.",

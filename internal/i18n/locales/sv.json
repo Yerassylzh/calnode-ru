@@ -170,7 +170,7 @@
   "directory_team_subtitle": "Boka tid med %s-teamet",
   "contact_method_label": "Primär kontakt",
   "contact_phone_label": "Telefonnummer",
-  "contact_phone_hint": "Internationellt format, t.ex. +77011234567. Valfri e-post får inbjudningar. Inga SMS skickas.",
+  "contact_phone_hint": "Internationellt format, t.ex. +77011234567. Inga SMS skickas.",
   "contact_phone_option": "Telefonnummer",
   "contact_email_option": "E-post",
   "contact_saved_notice": "Spara din privata länk för att se detaljer, boka om eller avboka. Inga SMS skickas.",

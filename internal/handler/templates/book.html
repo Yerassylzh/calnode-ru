@@ -204,10 +204,10 @@ body {
             {{if ne .ContactPolicy "phone_only"}}<option value="email"{{if eq .DefaultContactMethod "email"}} selected{{end}}>{{call .T "contact_email_option"}}</option>{{end}}
           </select>
         </div>
-        <div class="field">
+        <div class="field contact-phone-field">
           <label for="f-contact-phone">{{call .T "contact_phone_label"}}</label>
           <input id="f-contact-phone" name="contact_phone" type="tel" maxlength="64" autocomplete="tel" inputmode="tel" placeholder="+77011234567" aria-describedby="contact-hint">
-          <p id="contact-hint" class="sub">{{call .T "contact_phone_hint"}}</p>
+          <p id="contact-hint" class="contact-hint" role="tooltip">{{call .T "contact_phone_hint"}}</p>
         </div>
         {{if .PriceLabel}}<p class="sub">{{call .T "contact_paid_notice"}}</p>{{end}}
         <div class="field">
@@ -680,6 +680,10 @@ body {
   function syncContact() {
     contactForm.email.required = contactForm.contact_method.value === 'email';
     contactForm.contact_phone.required = contactForm.contact_method.value === 'phone';
+    contactForm.email.disabled = !contactForm.email.required;
+    contactForm.contact_phone.disabled = !contactForm.contact_phone.required;
+    contactForm.email.closest('.field').classList.toggle('hidden', contactForm.email.disabled);
+    contactForm.contact_phone.closest('.field').classList.toggle('hidden', contactForm.contact_phone.disabled);
   }
   contactForm.contact_method.addEventListener('change', syncContact);
   syncContact();
@@ -729,9 +733,9 @@ body {
           event_type_slug: SLUG,
           start_at: pickedSlot.start,
           name: form.name.value.trim(),
-          email: form.email.value.trim(),
+          email: form.email.disabled ? '' : form.email.value.trim(),
           contact_method: form.contact_method.value,
-          contact_phone: form.contact_phone.value.trim(),
+          contact_phone: form.contact_phone.disabled ? '' : form.contact_phone.value.trim(),
           phone: form.elements.phone?.value.trim() || "",
           timezone: TZ,
           language: LOCALE,
@@ -790,7 +794,7 @@ body {
           location: (booked && booked.location_value) || '',
           host_name: (booked && Array.isArray(booked.hosts)) ? booked.hosts.map(function (h) { return h.name; }).join(', ') : '',
           attendee_name: form.name.value.trim(),
-          attendee_email: form.email.value.trim(),
+          attendee_email: form.email.disabled ? '' : form.email.value.trim(),
           phone: form.elements.phone?.value.trim() || "",
           attendee_timezone: TZ,
           answers: dlAnswers,

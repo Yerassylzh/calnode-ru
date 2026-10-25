@@ -170,7 +170,7 @@
   "directory_team_subtitle": "Boek tijd met het %s-team",
   "contact_method_label": "Primair contact",
   "contact_phone_label": "Telefoonnummer",
-  "contact_phone_hint": "Internationaal formaat, bijv. +77011234567. Uitnodigingen gaan naar het optionele e-mailadres. Er worden geen sms-berichten verstuurd.",
+  "contact_phone_hint": "Internationaal formaat, bijv. +77011234567. Er worden geen sms-berichten verstuurd.",
   "contact_phone_option": "Telefoonnummer",
   "contact_email_option": "E-mail",
   "contact_saved_notice": "Bewaar je privélink om details te bekijken, te verplaatsen of te annuleren. Er worden geen sms-berichten verstuurd.",

@@ -170,7 +170,7 @@
   "directory_team_subtitle": "Réservez du temps avec l'équipe %s",
   "contact_method_label": "Contact principal",
   "contact_phone_label": "Numéro de téléphone",
-  "contact_phone_hint": "Format international, p. ex. +77011234567. Les invitations sont envoyées au courriel facultatif. Aucun SMS envoyé.",
+  "contact_phone_hint": "Format international, p. ex. +77011234567. Aucun SMS envoyé.",
   "contact_phone_option": "Téléphone",
   "contact_email_option": "Courriel",
   "contact_saved_notice": "Conservez votre lien privé pour consulter les détails, déplacer ou annuler la réservation. Aucun SMS envoyé.",

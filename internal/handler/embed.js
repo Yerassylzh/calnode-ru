@@ -590,17 +590,25 @@
       var name = el('input', { type: 'text', required: 'required', autocomplete: 'name', placeholder: t(this.i18n, 'name_placeholder') });
       var email = el('input', { id: 'contact-email', type: 'email', autocomplete: 'email', placeholder: t(this.i18n, 'email_placeholder') });
       form.appendChild(el('div', { class: 'field' }, [el('label', { text: t(this.i18n, 'name_label') }), name]));
-      var contactPhone = el('input', { id: 'contact-phone', type: 'tel', maxlength: '64', autocomplete: 'tel', inputmode: 'tel', placeholder: '+77011234567' });
+      var contactPhone = el('input', { id: 'contact-phone', type: 'tel', maxlength: '64', autocomplete: 'tel', inputmode: 'tel', placeholder: '+77011234567', 'aria-describedby': 'contact-hint' });
       var contactMethod = el('select', { id: 'contact-method' });
       var policy = this.info.booking_contact_policy || 'email_or_phone';
       if (policy !== 'email_only') contactMethod.appendChild(el('option', { value: 'phone', text: t(this.i18n, 'contact_phone_option') }));
       if (policy !== 'phone_only') contactMethod.appendChild(el('option', { value: 'email', text: t(this.i18n, 'contact_email_option') }));
       contactMethod.value = policy === 'email_only' ? 'email' : policy === 'phone_only' ? 'phone' : (this.info.default_contact_method || 'phone');
-      function syncContact() { email.required = contactMethod.value === 'email'; contactPhone.required = contactMethod.value === 'phone'; }
-      contactMethod.addEventListener('change', syncContact); syncContact();
+      function syncContact() {
+        email.required = contactMethod.value === 'email';
+        contactPhone.required = contactMethod.value === 'phone';
+        email.disabled = !email.required;
+        contactPhone.disabled = !contactPhone.required;
+        email.closest('.field').classList.toggle('hidden', email.disabled);
+        contactPhone.closest('.field').classList.toggle('hidden', contactPhone.disabled);
+      }
+      contactMethod.addEventListener('change', syncContact);
       form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-method', text: t(this.i18n, 'contact_method_label') }), contactMethod]));
-      form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-phone', text: t(this.i18n, 'contact_phone_label') }), contactPhone, el('p', { class: 'sub', text: t(this.i18n, 'contact_phone_hint') })]));
+      form.appendChild(el('div', { class: 'field contact-phone-field' }, [el('label', { for: 'contact-phone', text: t(this.i18n, 'contact_phone_label') }), contactPhone, el('p', { id: 'contact-hint', class: 'contact-hint', role: 'tooltip', text: t(this.i18n, 'contact_phone_hint') })]));
       form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-email', text: t(this.i18n, 'email_label') }), email]));
+      syncContact();
       if (this.info.price_cents > 0) form.appendChild(el('p', { class: 'sub', text: t(this.i18n, 'contact_paid_notice') }));
       var phone = el('input', { type: 'tel', maxlength: '40', autocomplete: 'tel', id: 'phone-call-number' });
       if (this.info.allow_phone_call) form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'phone-call-number', text: t(this.i18n, 'phone_call_number') }), phone]));
@@ -647,7 +655,7 @@
         });
         fetch(BASE + '/v1/bookings', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ event_type_slug: self.slug, start_at: slot.start, name: name.value.trim(), email: email.value.trim().toLowerCase(), contact_method: contactMethod.value, contact_phone: contactPhone.value.trim(), phone: phone.value.trim(), timezone: TZ, language: self.locale, hp_extra: hp.value, answers: answers }),
+          body: JSON.stringify({ event_type_slug: self.slug, start_at: slot.start, name: name.value.trim(), email: email.disabled ? '' : email.value.trim().toLowerCase(), contact_method: contactMethod.value, contact_phone: contactPhone.disabled ? '' : contactPhone.value.trim(), phone: phone.value.trim(), timezone: TZ, language: self.locale, hp_extra: hp.value, answers: answers }),
         }).then(function (r) {
           return r.json().then(function (data) { return { ok: r.ok, status: r.status, data: data }; });
         }).then(function (res) {

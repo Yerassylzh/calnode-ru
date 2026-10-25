@@ -170,7 +170,7 @@
   "directory_team_subtitle": "Zeit mit dem Team %s buchen",
   "contact_method_label": "Bevorzugter Kontakt",
   "contact_phone_label": "Telefonnummer",
-  "contact_phone_hint": "Internationales Format, z. B. +77011234567. Einladungen gehen an die optionale E-Mail. Es werden keine SMS versendet.",
+  "contact_phone_hint": "Internationales Format, z. B. +77011234567. Es werden keine SMS versendet.",
   "contact_phone_option": "Telefonnummer",
   "contact_email_option": "E-Mail",
   "contact_saved_notice": "Speichern Sie Ihren privaten Link, um Details anzusehen, umzubuchen oder abzusagen. Es werden keine SMS versendet.",
