@@ -61,17 +61,19 @@
 	let expandedId = $state<string | null>(null);
 	let answersCache: Record<string, AnswerItem[]> = $state({});
 	let answersLoading: Record<string, boolean> = $state({});
+	let answersErrors: Record<string, boolean> = $state({});
 
 	async function toggleExpand(id: string) {
 		if (expandedId === id) { expandedId = null; return; }
 		expandedId = id;
 		if (answersCache[id] === undefined) {
 			answersLoading[id] = true;
+			answersErrors[id] = false;
 			try {
 				const res = await api.get<{ items: AnswerItem[] }>(`/v1/bookings/${id}/answers`);
 				answersCache[id] = res.items ?? [];
 			} catch {
-				answersCache[id] = [];
+				answersErrors[id] = true;
 			}
 			answersLoading[id] = false;
 		}
@@ -555,7 +557,9 @@
 									<p class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{$t('bookings.details.intake')}</p>
 									{#if answersLoading[b.id]}
 										<p class="text-sm text-muted-foreground">{$t('common.loading')}</p>
-									{:else if !answersCache[b.id] || answersCache[b.id].length === 0}
+									{:else if answersErrors[b.id]}
+                                        <p class="text-sm text-destructive" role="alert">{$t('bookings.details.intakeError')}</p>
+                                    {:else if !answersCache[b.id] || answersCache[b.id].length === 0}
 										<p class="text-sm text-muted-foreground">{$t('bookings.details.noIntake')}</p>
 									{:else}
 										<dl class="space-y-2">

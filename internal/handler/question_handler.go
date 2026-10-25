@@ -357,13 +357,14 @@ func (h *Handler) DeleteQuestion(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GetBookingAnswers handles GET /v1/bookings/{id}/answers (admin).
-// Returns the intake question answers for a booking owned by the caller.
+// GetBookingAnswers handles GET /v1/bookings/{id}/answers (authenticated).
+// Admins may read workspace bookings; members may read bookings they host,
+// including assigned co-hosts. This matches the bookings list visibility rules.
 func (h *Handler) GetBookingAnswers(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromContext(r.Context())
 	id := r.PathValue("id")
 
-	// Verify caller owns the booking.
+	// Check existence before applying the same host/admin access rules as the list.
 	var hostID string
 	err := h.db.QueryRowContext(r.Context(),
 		`SELECT host_id FROM bookings WHERE id = ?`, id).Scan(&hostID)
@@ -376,7 +377,7 @@ func (h *Handler) GetBookingAnswers(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if hostID != user.ID {
+	if !user.IsAdmin && hostID != user.ID && !h.userHostsBooking(r.Context(), user.ID, id) {
 		h.writeError(w, http.StatusNotFound, "booking not found")
 		return
 	}

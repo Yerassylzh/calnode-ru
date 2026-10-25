@@ -3,6 +3,7 @@
 import type { CatalogEntry } from '../index';
 
 export const en: Record<string, CatalogEntry> = {
+	'bookings.details.intakeError': 'Could not load answers. Close and reopen this booking to try again.',
 	'bookings.pageTitle': 'Bookings — Calnode',
 	'bookings.heading': 'Bookings',
 	'bookings.subtitle.all': 'All meetings across the workspace.',
@@ -71,6 +72,7 @@ export const en: Record<string, CatalogEntry> = {
 };
 
 export const ru: Record<string, CatalogEntry> = {
+	'bookings.details.intakeError': 'Не удалось загрузить ответы. Сверните и снова раскройте запись, чтобы повторить попытку.',
 	'bookings.pageTitle': 'Бронирования — Calnode',
 	'bookings.heading': 'Бронирования',
 	'bookings.subtitle.all': 'Все встречи в рабочем пространстве.',
