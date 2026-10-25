@@ -17,7 +17,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "build": "vite build",
     "preview": "vite preview",
-    "test:visual": "vitest run"
+    "test:visual": "vitest run",
+    "test:booking-contact": "node scripts/booking-contact-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

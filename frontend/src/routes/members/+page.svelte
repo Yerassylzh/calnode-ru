@@ -312,7 +312,7 @@
 					<div class="mb-2">
 						<p class="text-sm font-medium">{b.event_type_name}</p>
 						<p class="text-xs text-muted-foreground">
-							{fmtDateTime(b.start_at)} · {b.attendee_name || b.attendee_email || $t('members.resolve.attendeeFallback')}
+							{fmtDateTime(b.start_at)} · {b.attendee_name || b.attendee_phone || b.attendee_email || $t('members.resolve.attendeeFallback')}
 						</p>
 					</div>
 					<div class="flex flex-wrap items-center gap-2">

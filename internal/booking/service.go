@@ -37,6 +37,11 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 		return nil, fmt.Errorf("booking: HostIDs must not be empty")
 	}
 
+	organizer, err := NormalizeContact(p.Organizer)
+	if err != nil {
+		return nil, err
+	}
+	p.Organizer = organizer
 	startStr := p.StartAt.UTC().Format(time.RFC3339Nano)
 	endStr := p.EndAt.UTC().Format(time.RFC3339Nano)
 
@@ -46,6 +51,13 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	var policy string
+	if err := tx.QueryRowContext(ctx, "SELECT booking_contact_policy FROM event_types WHERE id = ?", p.EventTypeID).Scan(&policy); err != nil {
+		return nil, err
+	}
+	if err := ValidateContactPolicy(policy, p.Organizer.ContactMethod); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	// Select hosts. Round-robin picks one *free* candidate from the rotation pool
@@ -125,8 +137,8 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 			SELECT COUNT(*) FROM bookings b
 			JOIN booking_attendees a ON a.booking_id = b.id AND a.is_organizer = 1
 			WHERE b.event_type_id = ? AND b.status != 'cancelled'
-			  AND b.end_at > ? AND a.email = ? COLLATE NOCASE`,
-			p.EventTypeID, now, p.Organizer.Email).Scan(&active); err != nil {
+			  AND b.end_at > ? AND ((? != '' AND a.email = ? COLLATE NOCASE) OR (? != '' AND a.phone = ?))`,
+			p.EventTypeID, now, p.Organizer.Email, p.Organizer.Email, p.Organizer.Phone, p.Organizer.Phone).Scan(&active); err != nil {
 			return nil, fmt.Errorf("booking: active-limit check: %w", err)
 		}
 		if active >= p.MaxActivePerInvitee {
@@ -142,8 +154,8 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM bookings b
 			JOIN booking_attendees a ON a.booking_id = b.id AND a.is_organizer = 1
-			WHERE a.email = ? COLLATE NOCASE AND b.created_at > ?`,
-			p.Organizer.Email, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)).Scan(&recent); err != nil {
+			WHERE ((? != '' AND a.email = ? COLLATE NOCASE) OR (? != '' AND a.phone = ?)) AND b.created_at > ?`,
+			p.Organizer.Email, p.Organizer.Email, p.Organizer.Phone, p.Organizer.Phone, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)).Scan(&recent); err != nil {
 			return nil, fmt.Errorf("booking: hourly throttle check: %w", err)
 		}
 		if recent >= p.MaxBookingsPerHour {
@@ -194,9 +206,9 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 		locale = "en"
 	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO booking_attendees (id, booking_id, name, email, iana_timezone, is_organizer, locale)
-		VALUES (?, ?, ?, ?, ?, 1, ?)`,
-		uid.New(), bookingID, p.Organizer.Name, p.Organizer.Email, tz, locale)
+		INSERT INTO booking_attendees (id, booking_id, name, email, iana_timezone, is_organizer, locale, phone, contact_method)
+		VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+		uid.New(), bookingID, p.Organizer.Name, p.Organizer.Email, tz, locale, p.Organizer.Phone, p.Organizer.ContactMethod)
 	if err != nil {
 		return nil, fmt.Errorf("booking: insert attendee: %w", err)
 	}
@@ -211,12 +223,21 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 		}
 	}
 
+	manageToken, manageHash, manageExpiry, err := generateManageToken()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO booking_manage_tokens (token_hash, booking_id, expires_at) VALUES (?, ?, ?)", manageHash, bookingID, manageExpiry); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("booking: commit: %w", err)
 	}
 
 	nowT, _ := time.Parse(time.RFC3339Nano, now)
 	return &Booking{
+		ManageToken:    manageToken,
+		ContactMethod:  p.Organizer.ContactMethod,
 		ID:             bookingID,
 		EventTypeID:    p.EventTypeID,
 		HostID:         chosenHost,
@@ -535,6 +556,19 @@ func (s *Service) Reschedule(ctx context.Context, bookingID string, newStart, ne
 		return nil, fmt.Errorf("booking: reschedule update: %w", err)
 	}
 
+	// Rotate the capability atomically with the reschedule so phone-only visitors
+	// cannot lose access between committing the move and returning the new URL.
+	rawToken, hash, expiry, err := generateManageToken()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM booking_manage_tokens WHERE booking_id = ?", bookingID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO booking_manage_tokens (token_hash, booking_id, expires_at) VALUES (?, ?, ?)", hash, bookingID, expiry); err != nil {
+		return nil, err
+	}
+	b.ManageToken = rawToken
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("booking: reschedule commit: %w", err)
 	}

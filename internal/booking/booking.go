@@ -11,7 +11,8 @@ var (
 	ErrAlreadyCancelled    = errors.New("booking: already cancelled")
 	ErrTokenNotFound       = errors.New("booking: manage token not found or expired")
 	ErrBookingLimitReached = errors.New("booking: active booking limit reached for this invitee")
-	ErrEmailThrottled      = errors.New("booking: too many bookings from this email address")
+	ErrContactThrottled    = errors.New("booking: too many bookings from these contact details")
+	ErrEmailThrottled      = ErrContactThrottled // compatibility alias for existing integrations/tests
 )
 
 // Who sends a booking's calendar invite to the booker (event_types/bookings.invite_delivery,
@@ -27,6 +28,9 @@ const (
 
 // Booking is a confirmed or cancelled appointment.
 type Booking struct {
+	// ManageToken is returned only by Create, never loaded by public lookup.
+	ManageToken        string
+	ContactMethod      string
 	ID                 string
 	EventTypeID        string
 	HostID             string
@@ -51,9 +55,11 @@ type Booking struct {
 
 // Attendee is a participant in a booking (the person who made the booking).
 type Attendee struct {
-	Name         string
-	Email        string
-	IANATimezone string
+	Phone         string
+	ContactMethod string
+	Name          string
+	Email         string
+	IANATimezone  string
 	// Locale is the attendee's resolved page locale at booking time (e.g. "es"), captured
 	// once and stored — see internal/db/migrations/00051_booking_attendee_locale.sql for why
 	// this can't be reconstructed later. Empty defaults to English at the DB layer.

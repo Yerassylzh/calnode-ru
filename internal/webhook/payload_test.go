@@ -12,6 +12,8 @@ func TestBuildData_defaultSetMatchesOriginalShape(t *testing.T) {
 		},
 		// enrichment present but must NOT leak via the default set
 		attendeeEmail: "bob@example.com",
+		attendeePhone: "+77011234567",
+		contactMethod: "phone",
 		hostEmail:     "host@example.com",
 		answers:       []map[string]string{{"question": "Topic", "answer": "Demo"}},
 	}
@@ -26,7 +28,7 @@ func TestBuildData_defaultSetMatchesOriginalShape(t *testing.T) {
 			t.Errorf("default payload should omit empty optional %q", k)
 		}
 	}
-	for _, k := range []string{"attendee_email", "attendee_name", "answers", "host_email", "event_type_name"} {
+	for _, k := range []string{"attendee_email", "attendee_name", "attendee_phone", "contact_method", "answers", "host_email", "event_type_name"} {
 		if _, ok := d[k]; ok {
 			t.Errorf("default payload must not include %q (backwards-compat)", k)
 		}
@@ -70,5 +72,16 @@ func TestValidFields_dropsUnknown(t *testing.T) {
 	got := ValidFields([]string{"id", "bogus", "attendee_email", ""})
 	if len(got) != 2 || got[0] != "id" || got[1] != "attendee_email" {
 		t.Errorf("ValidFields = %v; want [id attendee_email]", got)
+	}
+}
+
+func TestPhoneContactWebhookIsOptIn(t *testing.T) {
+	bd := enrichedBooking{attendeePhone: "+77011234567", contactMethod: "phone"}
+	data := buildData(bd, []string{FieldAttendeePhone, FieldContactMethod})
+	if data[FieldAttendeePhone] != bd.attendeePhone || data[FieldContactMethod] != "phone" {
+		t.Fatalf("selected contacts missing: %+v", data)
+	}
+	if _, exists := data[FieldAttendeeEmail]; exists {
+		t.Fatal("unselected email leaked")
 	}
 }

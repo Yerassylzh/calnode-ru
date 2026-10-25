@@ -20,24 +20,26 @@ const (
 )
 
 type eventTypeJSON struct {
-	AllowPhoneCall      bool    `json:"allow_phone_call"`
-	ID                  string  `json:"id"`
-	Slug                string  `json:"slug"`
-	Name                string  `json:"name"`
-	DisplayOrder        int     `json:"display_order"` // lower first on public directories; ties sort by name, then slug
-	Description         *string `json:"description"`
-	DurationMinutes     int     `json:"duration_minutes"`
-	SlotIntervalMinutes int     `json:"slot_interval_minutes"`
-	LocationType        string  `json:"location_type"`
-	LocationValue       *string `json:"location_value"`
-	RoutingMode         string  `json:"routing_mode"`
-	RRStrategy          string  `json:"rr_strategy"`
-	BufferBeforeMinutes int     `json:"buffer_before_minutes"`
-	BufferAfterMinutes  int     `json:"buffer_after_minutes"`
-	MinNoticeMinutes    int     `json:"min_notice_minutes"`
-	MaxFutureDays       int     `json:"max_future_days"`
-	MaxActiveBookings   int     `json:"max_active_bookings"`
-	IsActive            bool    `json:"is_active"`
+	ContactPolicy        string  `json:"booking_contact_policy"`
+	DefaultContactMethod string  `json:"default_contact_method"`
+	AllowPhoneCall       bool    `json:"allow_phone_call"`
+	ID                   string  `json:"id"`
+	Slug                 string  `json:"slug"`
+	Name                 string  `json:"name"`
+	DisplayOrder         int     `json:"display_order"` // lower first on public directories; ties sort by name, then slug
+	Description          *string `json:"description"`
+	DurationMinutes      int     `json:"duration_minutes"`
+	SlotIntervalMinutes  int     `json:"slot_interval_minutes"`
+	LocationType         string  `json:"location_type"`
+	LocationValue        *string `json:"location_value"`
+	RoutingMode          string  `json:"routing_mode"`
+	RRStrategy           string  `json:"rr_strategy"`
+	BufferBeforeMinutes  int     `json:"buffer_before_minutes"`
+	BufferAfterMinutes   int     `json:"buffer_after_minutes"`
+	MinNoticeMinutes     int     `json:"min_notice_minutes"`
+	MaxFutureDays        int     `json:"max_future_days"`
+	MaxActiveBookings    int     `json:"max_active_bookings"`
+	IsActive             bool    `json:"is_active"`
 	// ShowTakenSlots renders already-booked times greyed out on the booking page
 	// instead of omitting them. Off by default: the slots endpoint is public, so this
 	// makes the host's booked hours legible to anyone with the link (#19).
@@ -106,7 +108,7 @@ func scanEventTypeRow(s rowScanner, trailing ...any) (*eventTypeJSON, error) {
 		&isActive, &isPublic, &showTaken, &et.CreatedAt,
 		&msgConf, &msgCancel, &msgResched, &msgRemind, &msgGreeting,
 		&subjConf, &subjCancel, &subjResched, &subjRemind,
-		&et.PriceCents, &et.Currency, &et.InviteDelivery, &et.DisplayOrder,
+		&et.PriceCents, &et.Currency, &et.InviteDelivery, &et.DisplayOrder, &et.ContactPolicy, &et.DefaultContactMethod,
 	}
 	dests = append(dests, trailing...)
 	err := s.Scan(dests...)
@@ -165,7 +167,7 @@ const etColumns = `id, slug, name, description,
 	is_active, is_public, show_taken_slots, created_at,
 	msg_confirmation, msg_cancellation, msg_reschedule, msg_reminder, msg_greeting,
 	subj_confirmation, subj_cancellation, subj_reschedule, subj_reminder,
-	price_cents, currency, invite_delivery, display_order`
+	price_cents, currency, invite_delivery, display_order, booking_contact_policy, default_contact_method`
 
 // selectETCols fetches a single owner-scoped event type (no `owned` column).
 const selectETCols = "SELECT " + etColumns + " FROM event_types"
@@ -217,23 +219,25 @@ func (h *Handler) CreateEventType(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 
 	var req struct {
-		Slug                string  `json:"slug"`
-		Name                string  `json:"name"`
-		DisplayOrder        int     `json:"display_order"`
-		Description         *string `json:"description"`
-		DurationMinutes     int     `json:"duration_minutes"`
-		SlotIntervalMinutes *int    `json:"slot_interval_minutes"`
-		LocationType        *string `json:"location_type"`
-		LocationValue       *string `json:"location_value"`
-		RoutingMode         *string `json:"routing_mode"`
-		BufferBeforeMinutes *int    `json:"buffer_before_minutes"`
-		BufferAfterMinutes  *int    `json:"buffer_after_minutes"`
-		MinNoticeMinutes    *int    `json:"min_notice_minutes"`
-		MaxFutureDays       *int    `json:"max_future_days"`
-		MaxActiveBookings   *int    `json:"max_active_bookings"`
-		AllowPhoneCall      *bool   `json:"allow_phone_call"`
-		ShowTakenSlots      *bool   `json:"show_taken_slots"`
-		InviteDelivery      *string `json:"invite_delivery"`
+		Slug                 string  `json:"slug"`
+		Name                 string  `json:"name"`
+		DisplayOrder         int     `json:"display_order"`
+		Description          *string `json:"description"`
+		DurationMinutes      int     `json:"duration_minutes"`
+		SlotIntervalMinutes  *int    `json:"slot_interval_minutes"`
+		LocationType         *string `json:"location_type"`
+		LocationValue        *string `json:"location_value"`
+		RoutingMode          *string `json:"routing_mode"`
+		BufferBeforeMinutes  *int    `json:"buffer_before_minutes"`
+		BufferAfterMinutes   *int    `json:"buffer_after_minutes"`
+		MinNoticeMinutes     *int    `json:"min_notice_minutes"`
+		MaxFutureDays        *int    `json:"max_future_days"`
+		MaxActiveBookings    *int    `json:"max_active_bookings"`
+		ContactPolicy        *string `json:"booking_contact_policy"`
+		DefaultContactMethod *string `json:"default_contact_method"`
+		AllowPhoneCall       *bool   `json:"allow_phone_call"`
+		ShowTakenSlots       *bool   `json:"show_taken_slots"`
+		InviteDelivery       *string `json:"invite_delivery"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -322,6 +326,20 @@ func (h *Handler) CreateEventType(w http.ResponseWriter, r *http.Request) {
 		inviteDelivery = mode
 	}
 
+	policy, method := "", ""
+	if req.ContactPolicy != nil {
+		policy = *req.ContactPolicy
+	}
+	if req.DefaultContactMethod != nil {
+		method = *req.DefaultContactMethod
+	} else if policy == "email_only" {
+		method = "email"
+	}
+	policy, method, contactErr := booking.ContactSettings(policy, method)
+	if contactErr != nil {
+		h.writeError(w, http.StatusBadRequest, contactErr.Error())
+		return
+	}
 	id := uid.New()
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -457,39 +475,41 @@ func (h *Handler) PatchEventType(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 
 	var req struct {
-		Slug                *string `json:"slug"`
-		Name                *string `json:"name"`
-		DisplayOrder        *int    `json:"display_order"`
-		Description         *string `json:"description"`
-		DurationMinutes     *int    `json:"duration_minutes"`
-		SlotIntervalMinutes *int    `json:"slot_interval_minutes"`
-		LocationType        *string `json:"location_type"`
-		LocationValue       *string `json:"location_value"`
-		RoutingMode         *string `json:"routing_mode"`
-		RRStrategy          *string `json:"rr_strategy"`
-		BufferBeforeMinutes *int    `json:"buffer_before_minutes"`
-		BufferAfterMinutes  *int    `json:"buffer_after_minutes"`
-		MinNoticeMinutes    *int    `json:"min_notice_minutes"`
-		MaxFutureDays       *int    `json:"max_future_days"`
-		MaxActiveBookings   *int    `json:"max_active_bookings"`
-		IsActive            *bool   `json:"is_active"`
-		IsPublic            *bool   `json:"is_public"`
-		AllowPhoneCall      *bool   `json:"allow_phone_call"`
-		ShowTakenSlots      *bool   `json:"show_taken_slots"`
-		InviteDelivery      *string `json:"invite_delivery"`
-		Archived            *bool   `json:"archived"`
-		MsgConfirmation     *string `json:"msg_confirmation"`
-		MsgCancellation     *string `json:"msg_cancellation"`
-		MsgReschedule       *string `json:"msg_reschedule"`
-		MsgReminder         *string `json:"msg_reminder"`
-		MsgGreeting         *string `json:"msg_greeting"`
-		SubjConfirmation    *string `json:"subj_confirmation"`
-		SubjCancellation    *string `json:"subj_cancellation"`
-		SubjReschedule      *string `json:"subj_reschedule"`
-		SubjReminder        *string `json:"subj_reminder"`
-		PriceCents          *int    `json:"price_cents"`
-		Currency            *string `json:"currency"`
-		Reminders           []int   `json:"reminders"` // nil = don't touch; [] = clear all
+		Slug                 *string `json:"slug"`
+		Name                 *string `json:"name"`
+		DisplayOrder         *int    `json:"display_order"`
+		Description          *string `json:"description"`
+		DurationMinutes      *int    `json:"duration_minutes"`
+		SlotIntervalMinutes  *int    `json:"slot_interval_minutes"`
+		LocationType         *string `json:"location_type"`
+		LocationValue        *string `json:"location_value"`
+		RoutingMode          *string `json:"routing_mode"`
+		RRStrategy           *string `json:"rr_strategy"`
+		BufferBeforeMinutes  *int    `json:"buffer_before_minutes"`
+		BufferAfterMinutes   *int    `json:"buffer_after_minutes"`
+		MinNoticeMinutes     *int    `json:"min_notice_minutes"`
+		MaxFutureDays        *int    `json:"max_future_days"`
+		MaxActiveBookings    *int    `json:"max_active_bookings"`
+		IsActive             *bool   `json:"is_active"`
+		IsPublic             *bool   `json:"is_public"`
+		ContactPolicy        *string `json:"booking_contact_policy"`
+		DefaultContactMethod *string `json:"default_contact_method"`
+		AllowPhoneCall       *bool   `json:"allow_phone_call"`
+		ShowTakenSlots       *bool   `json:"show_taken_slots"`
+		InviteDelivery       *string `json:"invite_delivery"`
+		Archived             *bool   `json:"archived"`
+		MsgConfirmation      *string `json:"msg_confirmation"`
+		MsgCancellation      *string `json:"msg_cancellation"`
+		MsgReschedule        *string `json:"msg_reschedule"`
+		MsgReminder          *string `json:"msg_reminder"`
+		MsgGreeting          *string `json:"msg_greeting"`
+		SubjConfirmation     *string `json:"subj_confirmation"`
+		SubjCancellation     *string `json:"subj_cancellation"`
+		SubjReschedule       *string `json:"subj_reschedule"`
+		SubjReminder         *string `json:"subj_reminder"`
+		PriceCents           *int    `json:"price_cents"`
+		Currency             *string `json:"currency"`
+		Reminders            []int   `json:"reminders"` // nil = don't touch; [] = clear all
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -758,6 +778,28 @@ func (h *Handler) PatchEventType(w http.ResponseWriter, r *http.Request) {
 	// Same on-change rule for invite delivery: switching to Calnode-sent invites needs a
 	// working email sender (the invite IS an email), but an event type already set that
 	// way stays saveable if email is later removed - that is fixed in Settings → Email.
+	if req.ContactPolicy != nil || req.DefaultContactMethod != nil {
+		var policy, method string
+		if err := h.db.QueryRowContext(r.Context(), "SELECT booking_contact_policy, default_contact_method FROM event_types WHERE id = ?", etID).Scan(&policy, &method); err != nil {
+			h.writeError(w, http.StatusInternalServerError, "could not load contact settings")
+			return
+		}
+		if req.ContactPolicy != nil {
+			policy = *req.ContactPolicy
+		}
+		if req.DefaultContactMethod != nil {
+			method = *req.DefaultContactMethod
+		} else if policy != "email_or_phone" {
+			method = strings.TrimSuffix(policy, "_only")
+		}
+		policy, method, err := booking.ContactSettings(policy, method)
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		set("booking_contact_policy", policy)
+		set("default_contact_method", method)
+	}
 	if newInviteDelivery != "" && newInviteDelivery != curInviteDelivery {
 		if newInviteDelivery == booking.InviteByCalnode && !h.inviteSenderReady(r.Context()) {
 			h.writeError(w, http.StatusBadRequest, errInviteSenderMissing.Error())

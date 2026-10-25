@@ -147,7 +147,7 @@
   "calendar_event_summary": "%s mit %s",
   "calendar_event_booking_id": "Buchungsreferenz: %s",
   "err_booking_limit": "Sie haben bereits die maximale Anzahl anstehender Buchungen für diesen Termin erreicht. Bitte stornieren Sie eine bestehende Buchung oder warten Sie, bis eine vorüber ist.",
-  "err_email_throttled": "Zu viele Buchungen von dieser E-Mail-Adresse in letzter Zeit. Bitte versuchen Sie es später erneut.",
+  "err_email_throttled": "Zu viele Buchungen mit diesen Kontaktdaten. Bitte versuchen Sie es später erneut.",
   "err_required_field": "Pflichtfeld %q fehlt",
   "err_required_checkbox": "%q muss angekreuzt werden",
   "err_invalid_option": "ungültige Option für %[1]q: %[2]q ist keine zulässige Auswahl",
@@ -163,10 +163,19 @@
   "time_evening": "Abend",
   "phone_call_number": "Telefonnummer (optional, für einen Anruf)",
   "calendar_degraded_notice": "Einige Kalenderinformationen konnten nicht geladen werden, daher ist die Verfügbarkeit möglicherweise unvollständig.",
-
   "directory_book": "Buchen",
   "directory_empty": "Derzeit ist nichts buchbar.",
   "directory_members": "Teammitglieder",
   "directory_person_subtitle": "Zeit mit %s buchen",
-  "directory_team_subtitle": "Zeit mit dem Team %s buchen"
+  "directory_team_subtitle": "Zeit mit dem Team %s buchen",
+  "contact_method_label": "Bevorzugter Kontakt",
+  "contact_phone_label": "Telefonnummer",
+  "contact_phone_hint": "Internationales Format, z. B. +77011234567. Einladungen gehen an die optionale E-Mail. Es werden keine SMS versendet.",
+  "contact_phone_option": "Telefonnummer",
+  "contact_email_option": "E-Mail",
+  "contact_saved_notice": "Speichern Sie Ihren privaten Link, um Details anzusehen, umzubuchen oder abzusagen. Es werden keine SMS versendet.",
+  "contact_manage_link": "Buchung ansehen und verwalten",
+  "contact_paid_notice": "Bei der Zahlung kann eine E-Mail-Adresse für die Rechnung erforderlich sein.",
+  "contact_copy_link": "Privaten Link kopieren",
+  "contact_invalid_error": "Geben Sie Ihren Namen und eine gültige internationale Telefonnummer (z. B. +77011234567) oder E-Mail-Adresse ein."
 }

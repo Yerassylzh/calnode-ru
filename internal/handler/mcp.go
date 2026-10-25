@@ -85,11 +85,13 @@ func (h *Handler) MCPServer() *mcp.Server {
 type listEventTypesIn struct{}
 
 type eventTypeBrief struct {
-	ID              string `json:"id" jsonschema:"the event type's slug — pass this as event_type_id to other tools"`
-	Name            string `json:"name"`
-	DurationMinutes int    `json:"duration_minutes"`
-	LocationType    string `json:"location_type"`
-	Description     string `json:"description,omitempty"`
+	ContactPolicy        string `json:"booking_contact_policy"`
+	DefaultContactMethod string `json:"default_contact_method"`
+	ID                   string `json:"id" jsonschema:"the event type's slug — pass this as event_type_id to other tools"`
+	Name                 string `json:"name"`
+	DurationMinutes      int    `json:"duration_minutes"`
+	LocationType         string `json:"location_type"`
+	Description          string `json:"description,omitempty"`
 }
 
 type listEventTypesOut struct {
@@ -98,7 +100,7 @@ type listEventTypesOut struct {
 
 func (h *Handler) mcpListEventTypes(ctx context.Context, _ *mcp.CallToolRequest, _ listEventTypesIn) (*mcp.CallToolResult, listEventTypesOut, error) {
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT slug, name, duration_minutes, location_type, COALESCE(description, '')
+		SELECT slug, name, duration_minutes, location_type, COALESCE(description, ''), booking_contact_policy, default_contact_method
 		FROM event_types
 		WHERE is_active = 1 AND is_public = 1
 		ORDER BY name`)
@@ -109,7 +111,7 @@ func (h *Handler) mcpListEventTypes(ctx context.Context, _ *mcp.CallToolRequest,
 	out := listEventTypesOut{EventTypes: []eventTypeBrief{}}
 	for rows.Next() {
 		var e eventTypeBrief
-		if err := rows.Scan(&e.ID, &e.Name, &e.DurationMinutes, &e.LocationType, &e.Description); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.DurationMinutes, &e.LocationType, &e.Description, &e.ContactPolicy, &e.DefaultContactMethod); err != nil {
 			return nil, listEventTypesOut{}, fmt.Errorf("list event types: scan: %w", err)
 		}
 		out.EventTypes = append(out.EventTypes, e)
@@ -137,13 +139,15 @@ type getEventTypeIn struct {
 }
 
 type getEventTypeOut struct {
-	ID              string               `json:"id"`
-	Name            string               `json:"name"`
-	Description     string               `json:"description,omitempty"`
-	DurationMinutes int                  `json:"duration_minutes"`
-	LocationType    string               `json:"location_type"`
-	Hosts           []eventTypeHostBrief `json:"hosts,omitempty"`
-	Questions       []eventTypeQuestion  `json:"questions"`
+	ContactPolicy        string               `json:"booking_contact_policy"`
+	DefaultContactMethod string               `json:"default_contact_method"`
+	ID                   string               `json:"id"`
+	Name                 string               `json:"name"`
+	Description          string               `json:"description,omitempty"`
+	DurationMinutes      int                  `json:"duration_minutes"`
+	LocationType         string               `json:"location_type"`
+	Hosts                []eventTypeHostBrief `json:"hosts,omitempty"`
+	Questions            []eventTypeQuestion  `json:"questions"`
 }
 
 func (h *Handler) mcpGetEventType(ctx context.Context, _ *mcp.CallToolRequest, in getEventTypeIn) (*mcp.CallToolResult, getEventTypeOut, error) {
@@ -151,9 +155,9 @@ func (h *Handler) mcpGetEventType(ctx context.Context, _ *mcp.CallToolRequest, i
 	var etID string
 	var isActive int
 	err := h.db.QueryRowContext(ctx, `
-		SELECT id, name, COALESCE(description, ''), duration_minutes, location_type, is_active
+		SELECT id, name, COALESCE(description, ''), duration_minutes, location_type, is_active, booking_contact_policy, default_contact_method
 		FROM event_types WHERE slug = ?`, in.EventTypeID).
-		Scan(&etID, &out.Name, &out.Description, &out.DurationMinutes, &out.LocationType, &isActive)
+		Scan(&etID, &out.Name, &out.Description, &out.DurationMinutes, &out.LocationType, &isActive, &out.ContactPolicy, &out.DefaultContactMethod)
 	if err != nil || isActive == 0 {
 		return nil, getEventTypeOut{}, fmt.Errorf("event type not found: %s", in.EventTypeID)
 	}
@@ -243,9 +247,12 @@ func (h *Handler) mcpGetBooking(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if userID, fullAccess := mcpCallerScope(ctx); !fullAccess && !h.userHostsBooking(ctx, userID, b.ID) {
 		return nil, bookingJSON{}, fmt.Errorf("booking not found: %s", in.BookingID)
 	}
-	out := toBookingJSON(b)
-	out.EventTypeSlug = h.slugForEventTypeID(ctx, b.EventTypeID)
-	return nil, out, nil
+	_, fullAccess := mcpCallerScope(ctx)
+	items, err := h.enrichBookings(ctx, []booking.Booking{*b}, fullAccess)
+	if err != nil {
+		return nil, bookingJSON{}, err
+	}
+	return nil, items[0], nil
 }
 
 // ── list_bookings ────────────────────────────────────────────────────────────
@@ -295,7 +302,7 @@ func (h *Handler) mcpListBookings(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 
 	// The tool exposes event types by slug; bookings store the id.
-	slugByID, idBySlug := h.eventTypeSlugMaps(ctx)
+	_, idBySlug := h.eventTypeSlugMaps(ctx)
 	if in.EventTypeID != "" {
 		if id := idBySlug[in.EventTypeID]; id != "" {
 			f.EventTypeID = id
@@ -325,12 +332,11 @@ func (h *Handler) mcpListBookings(ctx context.Context, _ *mcp.CallToolRequest, i
 		return nil, listBookingsOut{}, fmt.Errorf("count bookings: %w", err)
 	}
 
-	out := listBookingsOut{Bookings: make([]bookingJSON, 0, len(all)), Total: counts.Total()}
-	for i := range all {
-		bj := toBookingJSON(&all[i])
-		bj.EventTypeSlug = slugByID[all[i].EventTypeID]
-		out.Bookings = append(out.Bookings, bj)
+	items, err := h.enrichBookings(ctx, all, fullAccess)
+	if err != nil {
+		return nil, listBookingsOut{}, err
 	}
+	out := listBookingsOut{Bookings: items, Total: counts.Total()}
 	return nil, out, nil
 }
 
@@ -371,14 +377,16 @@ type createBookingIn struct {
 	EventTypeID   string      `json:"event_type_id" jsonschema:"the event type slug (from list_event_types)"`
 	SlotStart     string      `json:"slot_start" jsonschema:"the slot's exact start as RFC3339, taken from get_available_slots"`
 	AttendeeName  string      `json:"attendee_name"`
-	AttendeeEmail string      `json:"attendee_email"`
+	AttendeeEmail string      `json:"attendee_email,omitempty"`
+	AttendeePhone string      `json:"attendee_phone,omitempty"`
+	ContactMethod string      `json:"contact_method,omitempty"`
 	Timezone      string      `json:"timezone,omitempty" jsonschema:"attendee IANA timezone; defaults to UTC"`
 	Answers       []mcpAnswer `json:"answers,omitempty" jsonschema:"answers to the event type's intake questions, if any are required"`
 }
 
 func (h *Handler) mcpCreateBooking(ctx context.Context, _ *mcp.CallToolRequest, in createBookingIn) (*mcp.CallToolResult, bookingJSON, error) {
-	if in.EventTypeID == "" || in.SlotStart == "" || in.AttendeeName == "" || in.AttendeeEmail == "" {
-		return nil, bookingJSON{}, fmt.Errorf("event_type_id, slot_start, attendee_name, and attendee_email are required")
+	if in.EventTypeID == "" || in.SlotStart == "" || in.AttendeeName == "" {
+		return nil, bookingJSON{}, fmt.Errorf("event_type_id, slot_start, and attendee_name are required")
 	}
 	tz := in.Timezone
 	if tz == "" {
@@ -398,7 +406,7 @@ func (h *Handler) mcpCreateBooking(ctx context.Context, _ *mcp.CallToolRequest, 
 	// Locale intentionally left unset (defaults to English at the DB layer) — an MCP
 	// caller is an agent/automation, not a browser with a resolved page locale.
 	b, err := h.createBookingForSlug(ctx, in.EventTypeID, startAt,
-		booking.Attendee{Name: in.AttendeeName, Email: in.AttendeeEmail, IANATimezone: tz}, raw)
+		booking.Attendee{Name: in.AttendeeName, Email: in.AttendeeEmail, Phone: in.AttendeePhone, ContactMethod: in.ContactMethod, IANATimezone: tz}, raw)
 	if err != nil {
 		switch {
 		case errors.Is(err, errCalendarUnavailable):
@@ -410,13 +418,13 @@ func (h *Handler) mcpCreateBooking(ctx context.Context, _ *mcp.CallToolRequest, 
 		case errors.Is(err, booking.ErrBookingLimitReached):
 			return nil, bookingJSON{}, fmt.Errorf("the attendee already holds the maximum number of upcoming bookings for this event")
 		case errors.Is(err, booking.ErrEmailThrottled):
-			return nil, bookingJSON{}, fmt.Errorf("too many booking attempts from this email address — please try again later")
+			return nil, bookingJSON{}, fmt.Errorf("too many booking attempts from these contact details — please try again later")
 		default:
 			return nil, bookingJSON{}, err // *answerError and others are human-readable
 		}
 	}
 
-	out := toBookingJSON(b)
+	out := h.createdBookingJSON(b)
 	out.EventTypeSlug = in.EventTypeID
 	for _, hd := range h.displayHostsForBooking(ctx, b.ID) {
 		out.Hosts = append(out.Hosts, hostBrief{ID: hd.ID, Name: hd.Name, AvatarURL: hd.AvatarURL})
@@ -476,7 +484,7 @@ func (h *Handler) mcpRescheduleBooking(ctx context.Context, _ *mcp.CallToolReque
 			return nil, bookingJSON{}, fmt.Errorf("reschedule: %w", err)
 		}
 	}
-	out := toBookingJSON(updated)
+	out := h.createdBookingJSON(updated)
 	out.EventTypeSlug = h.slugForEventTypeID(ctx, updated.EventTypeID)
 	go h.rescheduleSideEffects(*updated, b.EventTypeID, previousStart, previousEnd) // #nosec G118 -- deliberately its own context.Background(); see rescheduleSideEffects' doc comment
 	return nil, out, nil

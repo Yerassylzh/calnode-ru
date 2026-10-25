@@ -15,18 +15,22 @@ const checkoutHoldWindow = 31 * time.Minute
 
 // startBookingCheckout creates a Stripe Checkout session for a held (pending) booking, marks
 // the booking pending_payment, and returns the hosted Checkout URL to redirect the booker to.
-func (h *Handler) startBookingCheckout(ctx context.Context, sc *stripe.Client, bookingID string, priceCents int, currency, productName, slug, email string) (string, error) {
+func (h *Handler) startBookingCheckout(ctx context.Context, sc *stripe.Client, bookingID string, priceCents int, currency, productName, slug, email string, manageTokens ...string) (string, error) {
 	if currency == "" {
 		currency = "usd"
 	}
 	base := h.publicURL()
+	successURL := base + "/book/" + slug + "?paid=1&session_id={CHECKOUT_SESSION_ID}"
+	if len(manageTokens) > 0 && manageTokens[0] != "" {
+		successURL = base + "/manage/" + manageTokens[0] + "?checkout_session_id={CHECKOUT_SESSION_ID}"
+	}
 	sess, err := sc.CreateCheckoutSession(ctx, stripe.CheckoutParams{
 		AmountCents:   int64(priceCents),
 		Currency:      currency,
 		ProductName:   productName,
 		CustomerEmail: email,
 		// Stripe substitutes {CHECKOUT_SESSION_ID}; the page shows a "payment received" banner.
-		SuccessURL: base + "/book/" + slug + "?paid=1&session_id={CHECKOUT_SESSION_ID}",
+		SuccessURL: successURL,
 		CancelURL:  base + "/book/" + slug,
 		ExpiresAt:  time.Now().Add(checkoutHoldWindow),
 		Metadata:   map[string]string{"booking_id": bookingID},
@@ -113,12 +117,12 @@ func (h *Handler) confirmPaidBooking(ctx context.Context, bookingID, paymentInte
 	// Reconstruct the confirmation context from the booking's event type + organizer.
 	var in bookingConfirmationInput
 	if err := h.db.QueryRowContext(ctx, `
-		SELECT et.name, et.slug, COALESCE(NULLIF(b.location_type, ''), et.location_type), a.name, a.email, a.iana_timezone, a.locale
+		SELECT et.name, et.slug, COALESCE(NULLIF(b.location_type, ''), et.location_type), a.name, a.email, a.iana_timezone, a.locale, a.phone
 		FROM bookings b
 		JOIN event_types et ON et.id = b.event_type_id
 		JOIN booking_attendees a ON a.booking_id = b.id AND a.is_organizer = 1
 		WHERE b.id = ?`, bookingID).
-		Scan(&in.EventTypeName, &in.EventTypeSlug, &in.LocationType, &in.OrganizerName, &in.OrganizerEmail, &in.OrganizerTimezone, &in.OrganizerLocale); err != nil {
+		Scan(&in.EventTypeName, &in.EventTypeSlug, &in.LocationType, &in.OrganizerName, &in.OrganizerEmail, &in.OrganizerTimezone, &in.OrganizerLocale, &in.OrganizerPhone); err != nil {
 		h.logger.ErrorContext(ctx, "stripe: load confirmation input", "error", err, "booking_id", bookingID)
 		return
 	}

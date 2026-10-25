@@ -147,7 +147,7 @@
   "calendar_event_summary": "%s com %s",
   "calendar_event_booking_id": "Referência da marcação: %s",
   "err_booking_limit": "Já atingiu o número máximo de marcações futuras para este evento. Cancele uma marcação existente ou aguarde que passe antes de criar outra.",
-  "err_email_throttled": "Demasiadas marcações recentes a partir deste endereço de e-mail. Tente novamente mais tarde.",
+  "err_email_throttled": "Demasiadas reservas com estes contactos. Tente novamente mais tarde.",
   "err_required_field": "falta o campo obrigatório %q",
   "err_required_checkbox": "%q tem de ser selecionado",
   "err_invalid_option": "opção inválida para %[1]q: %[2]q não é uma escolha permitida",
@@ -163,10 +163,19 @@
   "time_evening": "Noite",
   "phone_call_number": "Telefone (opcional, para uma chamada)",
   "calendar_degraded_notice": "Não foi possível carregar algumas informações da agenda, por isso a disponibilidade pode estar incompleta.",
-
   "directory_book": "Reservar",
   "directory_empty": "Nada para reservar no momento.",
   "directory_members": "Membros da equipa",
   "directory_person_subtitle": "Marque tempo com %s",
-  "directory_team_subtitle": "Marque tempo com a equipa %s"
+  "directory_team_subtitle": "Marque tempo com a equipa %s",
+  "contact_method_label": "Contacto principal",
+  "contact_phone_label": "Número de telefone",
+  "contact_phone_hint": "Formato internacional, por exemplo +77011234567. O email opcional recebe convites. Não são enviados SMS.",
+  "contact_phone_option": "Telefone",
+  "contact_email_option": "Email",
+  "contact_saved_notice": "Guarde a ligação privada para ver detalhes, reagendar ou cancelar a reserva. Não são enviados SMS.",
+  "contact_manage_link": "Ver e gerir reserva",
+  "contact_paid_notice": "O pagamento pode pedir um email de faturação.",
+  "contact_copy_link": "Copiar ligação privada",
+  "contact_invalid_error": "Introduza o nome e um telefone internacional válido (por exemplo +77011234567) ou email."
 }

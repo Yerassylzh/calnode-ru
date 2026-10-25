@@ -431,7 +431,15 @@
 						<td class="px-4 py-3">
 							{#if b.attendees && b.attendees.length > 0}
 								<div class="font-medium">{b.attendees[0].name}</div>
-								<div class="text-xs text-muted-foreground">{b.attendees[0].email}</div>
+								<div class="text-xs text-muted-foreground">
+                                  {#if b.attendees[0].contact_method === 'phone'}
+                                    <a href={'tel:' + b.attendees[0].phone}>{b.attendees[0].phone}</a>
+                                    {#if b.attendees[0].email}<a class="block" href={'mailto:' + b.attendees[0].email}>{b.attendees[0].email}</a>{/if}
+                                  {:else}
+                                    <a href={'mailto:' + b.attendees[0].email}>{b.attendees[0].email}</a>
+                                    {#if b.attendees[0].phone}<a class="block" href={'tel:' + b.attendees[0].phone}>{b.attendees[0].phone}</a>{/if}
+                                  {/if}
+                                </div>
 							{:else}
 								<span class="text-muted-foreground">—</span>
 							{/if}

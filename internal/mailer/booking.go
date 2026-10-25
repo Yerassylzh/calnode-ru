@@ -21,6 +21,7 @@ type BookingData struct {
 	HostEmail          string
 	OrganizerName      string
 	OrganizerEmail     string
+	OrganizerPhone     string
 	OrganizerTimezone  string
 	StartAt            time.Time // UTC (new time for reschedule emails)
 	EndAt              time.Time
@@ -218,6 +219,9 @@ func (d BookingData) OutlookCalURL() string {
 
 // SendConfirmationToAttendee sends a booking confirmation email to the organizer/attendee.
 func SendConfirmationToAttendee(ctx context.Context, m Mailer, d BookingData) error {
+	if d.OrganizerEmail == "" {
+		return nil
+	}
 	msg := Message{
 		To:      []string{d.OrganizerEmail},
 		Subject: d.subjectOr(d.Tf("email_subject_confirmed", d.EventTypeName)),
@@ -334,6 +338,9 @@ func SendCancellation(ctx context.Context, m Mailer, d BookingData) error {
 // SendRescheduleToAttendee sends a reschedule notification to the organizer/attendee.
 // d.PreviousStartAt / PreviousEndAt must be set to the old times.
 func SendRescheduleToAttendee(ctx context.Context, m Mailer, d BookingData) error {
+	if d.OrganizerEmail == "" {
+		return nil
+	}
 	msg := Message{
 		To:      []string{d.OrganizerEmail},
 		Subject: d.subjectOr(d.Tf("email_subject_rescheduled", d.EventTypeName)),
@@ -390,6 +397,9 @@ func SendReschedule(ctx context.Context, m Mailer, d BookingData) error {
 
 // SendReminder sends a reminder email to the organizer.
 func SendReminder(ctx context.Context, m Mailer, d BookingData) error {
+	if d.OrganizerEmail == "" {
+		return nil
+	}
 	if err := m.Send(ctx, Message{
 		To:      []string{d.OrganizerEmail},
 		Subject: d.subjectOr(d.Tf("email_subject_reminder", d.EventTypeName)),
@@ -466,7 +476,7 @@ var confirmHostTmpl = template.Must(template.New("confirm-host").Parse(
 You have a new booking.
 
 Event:    {{.EventTypeName}}
-With:     {{.OrganizerName}} <{{.OrganizerEmail}}>
+With:     {{.OrganizerName}} {{if .OrganizerEmail}}<{{.OrganizerEmail}}>{{end}}{{if .OrganizerPhone}} ({{.OrganizerPhone}}){{end}}
 Start:    {{.StartFmt}}
 End:      {{.EndFmt}}{{if .LocationValue}}
 Location: {{.LocationValue}}{{end}}
@@ -502,7 +512,7 @@ var cancelHostTmpl = template.Must(template.New("cancel-host").Parse(
 A booking has been cancelled.
 
 Event:    {{.EventTypeName}}
-With:     {{.OrganizerName}} <{{.OrganizerEmail}}>
+With:     {{.OrganizerName}} {{if .OrganizerEmail}}<{{.OrganizerEmail}}>{{end}}{{if .OrganizerPhone}} ({{.OrganizerPhone}}){{end}}
 Start:    {{.StartFmt}}
 End:      {{.EndFmt}}{{if .CancellationReason}}
 Reason:   {{.CancellationReason}}{{end}}
@@ -545,7 +555,7 @@ var rescheduleHostTmpl = template.Must(template.New("reschedule-host").Parse(
 A booking has been rescheduled.
 
 Event:    {{.EventTypeName}}
-With:     {{.OrganizerName}} <{{.OrganizerEmail}}>
+With:     {{.OrganizerName}} {{if .OrganizerEmail}}<{{.OrganizerEmail}}>{{end}}{{if .OrganizerPhone}} ({{.OrganizerPhone}}){{end}}
 Was:      {{.PreviousStartFmt}}
 Now:      {{.StartFmt}}
 End:      {{.EndFmt}}{{if .LocationValue}}

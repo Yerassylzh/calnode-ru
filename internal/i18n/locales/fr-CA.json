@@ -147,7 +147,7 @@
   "calendar_event_summary": "%s avec %s",
   "calendar_event_booking_id": "Référence de la réservation : %s",
   "err_booking_limit": "Vous avez déjà atteint le nombre maximum de réservations à venir pour cet événement. Annulez une réservation existante ou attendez qu'elle soit passée avant d'en créer une nouvelle.",
-  "err_email_throttled": "Trop de réservations récentes depuis cette adresse courriel. Veuillez réessayer plus tard.",
+  "err_email_throttled": "Trop de réservations avec ces coordonnées. Réessayez plus tard.",
   "err_required_field": "le champ obligatoire %q est manquant",
   "err_required_checkbox": "%q doit être coché",
   "err_invalid_option": "option non valide pour %[1]q : %[2]q n'est pas un choix autorisé",
@@ -163,10 +163,19 @@
   "time_afternoon": "Après-midi",
   "time_evening": "Soir",
   "calendar_degraded_notice": "Certains renseignements d'agenda n'ont pas pu être chargés, les disponibilités peuvent donc être incomplètes.",
-
   "directory_book": "Réserver",
   "directory_empty": "Rien à réserver pour le moment.",
   "directory_members": "Membres de l'équipe",
   "directory_person_subtitle": "Réservez du temps avec %s",
-  "directory_team_subtitle": "Réservez du temps avec l'équipe %s"
+  "directory_team_subtitle": "Réservez du temps avec l'équipe %s",
+  "contact_method_label": "Contact principal",
+  "contact_phone_label": "Numéro de téléphone",
+  "contact_phone_hint": "Format international, p. ex. +77011234567. Les invitations sont envoyées au courriel facultatif. Aucun SMS envoyé.",
+  "contact_phone_option": "Téléphone",
+  "contact_email_option": "Courriel",
+  "contact_saved_notice": "Conservez votre lien privé pour consulter les détails, déplacer ou annuler la réservation. Aucun SMS envoyé.",
+  "contact_manage_link": "Consulter et gérer la réservation",
+  "contact_paid_notice": "Le paiement peut demander un courriel de facturation.",
+  "contact_copy_link": "Copier le lien privé",
+  "contact_invalid_error": "Indiquez votre nom et un téléphone international valide (p. ex. +77011234567) ou un courriel."
 }

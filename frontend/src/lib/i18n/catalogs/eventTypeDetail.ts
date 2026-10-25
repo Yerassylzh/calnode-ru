@@ -3,6 +3,14 @@
 import type { CatalogEntry } from '../index';
 
 export const en: Record<string, CatalogEntry> = {
+	"eventTypeDetail.contactPolicy": "Booking contact",
+	"eventTypeDetail.contactPolicy.email_or_phone": "Phone or email",
+	"eventTypeDetail.contactPolicy.phone_only": "Phone required",
+	"eventTypeDetail.contactPolicy.email_only": "Email required",
+	"eventTypeDetail.contactDefault": "Selected by default",
+	"eventTypeDetail.contactDefault.phone": "Phone number",
+	"eventTypeDetail.contactDefault.email": "Email",
+	"eventTypeDetail.contactHelp": "Contact details do not change the meeting location. Phone-only bookings do not receive SMS; visitors must save their private manage link.",
 	'eventTypeDetail.pageTitleSuffix': 'Event Type — Calnode',
 	'eventTypeDetail.previewBookingPage': 'Preview booking page',
 
@@ -255,6 +263,14 @@ export const en: Record<string, CatalogEntry> = {
 };
 
 export const ru: Record<string, CatalogEntry> = {
+	"eventTypeDetail.contactPolicy": "Контакт для записи",
+	"eventTypeDetail.contactPolicy.email_or_phone": "Телефон или email",
+	"eventTypeDetail.contactPolicy.phone_only": "Обязателен телефон",
+	"eventTypeDetail.contactPolicy.email_only": "Обязателен email",
+	"eventTypeDetail.contactDefault": "Выбран по умолчанию",
+	"eventTypeDetail.contactDefault.phone": "Телефон",
+	"eventTypeDetail.contactDefault.email": "Email",
+	"eventTypeDetail.contactHelp": "Контакт не меняет место встречи. SMS не отправляются: посетителю нужно сохранить личную ссылку для управления записью.",
 	'eventTypeDetail.pageTitleSuffix': 'Тип события — Calnode',
 	'eventTypeDetail.previewBookingPage': 'Предпросмотр страницы бронирования',
 

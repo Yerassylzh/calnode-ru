@@ -147,7 +147,7 @@
   "calendar_event_summary": "%s met %s",
   "calendar_event_booking_id": "Boekingsreferentie: %s",
   "err_booking_limit": "Je hebt al het maximale aantal komende boekingen voor dit evenement bereikt. Annuleer een bestaande boeking of wacht tot die voorbij is voordat je een nieuwe maakt.",
-  "err_email_throttled": "Te veel recente boekingen vanaf dit e-mailadres. Probeer het later opnieuw.",
+  "err_email_throttled": "Te veel boekingen met deze contactgegevens. Probeer het later opnieuw.",
   "err_required_field": "verplicht veld %q ontbreekt",
   "err_required_checkbox": "%q moet aangevinkt zijn",
   "err_invalid_option": "ongeldige optie voor %[1]q: %[2]q is geen toegestane keuze",
@@ -163,10 +163,19 @@
   "time_evening": "Avond",
   "phone_call_number": "Telefoonnummer (optioneel, voor een telefoongesprek)",
   "calendar_degraded_notice": "Sommige agendagegevens konden niet worden geladen, dus de beschikbaarheid is mogelijk onvolledig.",
-
   "directory_book": "Boeken",
   "directory_empty": "Er is momenteel niets te boeken.",
   "directory_members": "Teamleden",
   "directory_person_subtitle": "Boek tijd met %s",
-  "directory_team_subtitle": "Boek tijd met het %s-team"
+  "directory_team_subtitle": "Boek tijd met het %s-team",
+  "contact_method_label": "Primair contact",
+  "contact_phone_label": "Telefoonnummer",
+  "contact_phone_hint": "Internationaal formaat, bijv. +77011234567. Uitnodigingen gaan naar het optionele e-mailadres. Er worden geen sms-berichten verstuurd.",
+  "contact_phone_option": "Telefoonnummer",
+  "contact_email_option": "E-mail",
+  "contact_saved_notice": "Bewaar je privélink om details te bekijken, te verplaatsen of te annuleren. Er worden geen sms-berichten verstuurd.",
+  "contact_manage_link": "Boeking bekijken en beheren",
+  "contact_paid_notice": "Bij de betaling kan een e-mailadres voor de factuur nodig zijn.",
+  "contact_copy_link": "Privélink kopiëren",
+  "contact_invalid_error": "Vul je naam en een geldig internationaal telefoonnummer (bijv. +77011234567) of e-mailadres in."
 }

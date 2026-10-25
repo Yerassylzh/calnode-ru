@@ -416,7 +416,8 @@
           this.asstMessages.push({ role: 'assistant', content: botEl.textContent });
           if (booking) botEl.className = 'asst-msg ok';
         }
-        if (booking) this.dispatchEvent(new CustomEvent('calnode:booked', { bubbles: true, composed: true, detail: booking }));
+        if (booking && booking.manage_url) this.asstLog.appendChild(el('a', { href: booking.manage_url, rel: 'noreferrer', text: t(this.i18n, 'contact_manage_link') }));
+        if (booking) this.dispatchEvent(new CustomEvent('calnode:booked', { bubbles: true, composed: true, detail: { id: booking.id, start_at: booking.start_at, end_at: booking.end_at, status: booking.status } }));
       } catch (e) {
         if (typing.parentNode) typing.remove();
         this.asstAdd(t(this.i18n, 'assistant_error'), 'note');
@@ -587,9 +588,20 @@
       var hp = el('input', { type: 'text', name: 'hp_extra', tabindex: '-1', autocomplete: 'off' });
       form.appendChild(el('div', { 'aria-hidden': 'true', style: 'position:absolute;left:-5000px;height:0;width:0;overflow:hidden;' }, [hp]));
       var name = el('input', { type: 'text', required: 'required', autocomplete: 'name', placeholder: t(this.i18n, 'name_placeholder') });
-      var email = el('input', { type: 'email', required: 'required', autocomplete: 'email', placeholder: t(this.i18n, 'email_placeholder') });
+      var email = el('input', { id: 'contact-email', type: 'email', autocomplete: 'email', placeholder: t(this.i18n, 'email_placeholder') });
       form.appendChild(el('div', { class: 'field' }, [el('label', { text: t(this.i18n, 'name_label') }), name]));
-      form.appendChild(el('div', { class: 'field' }, [el('label', { text: t(this.i18n, 'email_label') }), email]));
+      var contactPhone = el('input', { id: 'contact-phone', type: 'tel', maxlength: '64', autocomplete: 'tel', inputmode: 'tel', placeholder: '+77011234567' });
+      var contactMethod = el('select', { id: 'contact-method' });
+      var policy = this.info.booking_contact_policy || 'email_or_phone';
+      if (policy !== 'email_only') contactMethod.appendChild(el('option', { value: 'phone', text: t(this.i18n, 'contact_phone_option') }));
+      if (policy !== 'phone_only') contactMethod.appendChild(el('option', { value: 'email', text: t(this.i18n, 'contact_email_option') }));
+      contactMethod.value = policy === 'email_only' ? 'email' : policy === 'phone_only' ? 'phone' : (this.info.default_contact_method || 'phone');
+      function syncContact() { email.required = contactMethod.value === 'email'; contactPhone.required = contactMethod.value === 'phone'; }
+      contactMethod.addEventListener('change', syncContact); syncContact();
+      form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-method', text: t(this.i18n, 'contact_method_label') }), contactMethod]));
+      form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-phone', text: t(this.i18n, 'contact_phone_label') }), contactPhone, el('p', { class: 'sub', text: t(this.i18n, 'contact_phone_hint') })]));
+      form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'contact-email', text: t(this.i18n, 'email_label') }), email]));
+      if (this.info.price_cents > 0) form.appendChild(el('p', { class: 'sub', text: t(this.i18n, 'contact_paid_notice') }));
       var phone = el('input', { type: 'tel', maxlength: '40', autocomplete: 'tel', id: 'phone-call-number' });
       if (this.info.allow_phone_call) form.appendChild(el('div', { class: 'field' }, [el('label', { for: 'phone-call-number', text: t(this.i18n, 'phone_call_number') }), phone]));
       var qInputs = [];
@@ -619,6 +631,7 @@
       form.appendChild(errBox); form.appendChild(cta);
       form.addEventListener('submit', function (e) {
         e.preventDefault();
+        if (!form.reportValidity()) return;
         errBox.textContent = '';
         cta.disabled = true; cta.textContent = t(self.i18n, 'confirming');
         var answers = [];
@@ -634,7 +647,7 @@
         });
         fetch(BASE + '/v1/bookings', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ event_type_slug: self.slug, start_at: slot.start, name: name.value.trim(), email: email.value.trim().toLowerCase(), phone: phone.value.trim(), timezone: TZ, language: self.locale, hp_extra: hp.value, answers: answers }),
+          body: JSON.stringify({ event_type_slug: self.slug, start_at: slot.start, name: name.value.trim(), email: email.value.trim().toLowerCase(), contact_method: contactMethod.value, contact_phone: contactPhone.value.trim(), phone: phone.value.trim(), timezone: TZ, language: self.locale, hp_extra: hp.value, answers: answers }),
         }).then(function (r) {
           return r.json().then(function (data) { return { ok: r.ok, status: r.status, data: data }; });
         }).then(function (res) {
@@ -649,8 +662,9 @@
           // Paid event types: the server returns a Stripe Checkout URL. Send the visitor
           // there (top window, so it isn't trapped in the host page's frame).
           if (res.data && res.data.checkout_url) { (window.top || window).location.href = res.data.checkout_url; return; }
+          self.manageURL = res.data.manage_url;
           self.state.view = 'confirm'; self.render();
-          self.dispatchEvent(new CustomEvent('calnode:booked', { bubbles: true, composed: true, detail: res.data }));
+          self.dispatchEvent(new CustomEvent('calnode:booked', { bubbles: true, composed: true, detail: { id: res.data.id, start_at: res.data.start_at, end_at: res.data.end_at, status: res.data.status } }));
         }).catch(function (err) {
           errBox.textContent = err.message || t(self.i18n, 'booking_failed_error');
           cta.disabled = false; cta.textContent = t(self.i18n, 'confirm_booking');
@@ -665,7 +679,8 @@
         el('div', { class: 'confirm-view' }, [
           el('h3', { text: t(this.i18n, 'booking_confirmed') }),
           el('p', { class: 'when', text: shortDay(slot.start, this.locale) + ' · ' + timeLabel(slot.start, this.locale) }),
-          el('p', { class: 'sub', text: t(this.i18n, 'confirmation_email_sent') }),
+          el('p', { class: 'sub', text: t(this.i18n, 'contact_saved_notice') }),
+          ...(this.manageURL ? [el('a', { href: this.manageURL, rel: 'noreferrer', text: t(this.i18n, 'contact_manage_link') })] : []),
         ]),
       ]);
     }

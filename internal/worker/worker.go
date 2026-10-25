@@ -346,6 +346,9 @@ func (w *Worker) sendReminder(ctx context.Context, payload string) error {
 	if orgErr != nil {
 		return fmt.Errorf("worker: reminder: load organizer: %w", orgErr)
 	}
+	if d.OrganizerEmail == "" {
+		return nil
+	} // No automated delivery channel; not a retryable failure.
 	d.Locale = i18n.Get(locale)
 
 	// Brand the reminder email with the instance wordmark/logo.

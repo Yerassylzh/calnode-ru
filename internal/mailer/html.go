@@ -86,7 +86,7 @@ var htmlConfirmHost = content(`{{define "content"}}
 <p style="margin:0 0 20px;color:#52525b;">You have a new booking.</p>
 {{template "cardOpen" .}}
 <tr>` + labelTD + `Event</td><td style="padding:5px 0;font-weight:500;vertical-align:top;">{{.EventTypeName}}</td></tr>
-<tr>` + labelTD + `With</td>` + valueTD + `{{.OrganizerName}} &lt;{{.OrganizerEmail}}&gt;</td></tr>
+<tr>` + labelTD + `With</td>` + valueTD + `{{.OrganizerName}}{{if .OrganizerEmail}} &lt;{{.OrganizerEmail}}&gt;{{end}}{{if .OrganizerPhone}} ({{.OrganizerPhone}}){{end}}</td></tr>
 <tr>` + labelTD + `When</td>` + valueTD + `{{.WhenFmt}}</td></tr>
 {{if .LocationValue}}<tr>` + labelTD + `Location</td><td style="padding:5px 0;vertical-align:top;word-break:break-word;">{{.LocationValue}}</td></tr>{{end}}
 {{template "cardClose" .}}
@@ -111,7 +111,7 @@ var htmlCancelHost = content(`{{define "content"}}
 <p style="margin:0 0 20px;color:#52525b;">A booking has been cancelled.</p>
 {{template "cardOpen" .}}
 <tr>` + labelTD + `Event</td><td style="padding:5px 0;font-weight:500;vertical-align:top;">{{.EventTypeName}}</td></tr>
-<tr>` + labelTD + `With</td>` + valueTD + `{{.OrganizerName}} &lt;{{.OrganizerEmail}}&gt;</td></tr>
+<tr>` + labelTD + `With</td>` + valueTD + `{{.OrganizerName}}{{if .OrganizerEmail}} &lt;{{.OrganizerEmail}}&gt;{{end}}{{if .OrganizerPhone}} ({{.OrganizerPhone}}){{end}}</td></tr>
 <tr>` + labelTD + `When</td>` + valueTD + `{{.WhenFmt}}</td></tr>
 {{if .CancellationReason}}<tr>` + labelTD + `Reason</td>` + valueTD + `{{.CancellationReason}}</td></tr>{{end}}
 {{template "cardClose" .}}
@@ -139,7 +139,7 @@ var htmlRescheduleHost = content(`{{define "content"}}
 <p style="margin:0 0 20px;color:#52525b;">A booking has been rescheduled.</p>
 {{template "cardOpen" .}}
 <tr>` + labelTD + `Event</td><td style="padding:5px 0;font-weight:500;vertical-align:top;">{{.EventTypeName}}</td></tr>
-<tr>` + labelTD + `With</td>` + valueTD + `{{.OrganizerName}} &lt;{{.OrganizerEmail}}&gt;</td></tr>
+<tr>` + labelTD + `With</td>` + valueTD + `{{.OrganizerName}}{{if .OrganizerEmail}} &lt;{{.OrganizerEmail}}&gt;{{end}}{{if .OrganizerPhone}} ({{.OrganizerPhone}}){{end}}</td></tr>
 <tr><td style="color:#a1a1aa;padding:5px 0;width:84px;vertical-align:top;text-decoration:line-through;">Was</td><td style="padding:5px 0;vertical-align:top;color:#a1a1aa;text-decoration:line-through;">{{.PreviousStartFmt}}</td></tr>
 <tr>` + labelTD + `Now</td><td style="padding:5px 0;font-weight:500;vertical-align:top;">{{.WhenFmt}}</td></tr>
 {{if .LocationValue}}<tr>` + labelTD + `Location</td><td style="padding:5px 0;vertical-align:top;word-break:break-word;">{{.LocationValue}}</td></tr>{{end}}

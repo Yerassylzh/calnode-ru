@@ -591,6 +591,7 @@ func TestDuplicateEventType_handlesEveryEventTypeColumn(t *testing.T) {
 
 	// Copied by the INSERT … SELECT in DuplicateEventType.
 	copied := map[string]bool{
+		"booking_contact_policy": true, "default_contact_method": true,
 		"user_id": true, "team_id": true, "name": true, "description": true,
 		"duration_minutes": true, "slot_interval_minutes": true,
 		"location_type": true, "location_value": true, "allow_phone_call": true,

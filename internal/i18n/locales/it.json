@@ -147,7 +147,7 @@
   "calendar_event_summary": "%s con %s",
   "calendar_event_booking_id": "Riferimento prenotazione: %s",
   "err_booking_limit": "Hai già raggiunto il numero massimo di prenotazioni future per questo evento. Annulla una prenotazione esistente o attendi che sia passata prima di crearne un'altra.",
-  "err_email_throttled": "Troppe prenotazioni recenti da questo indirizzo email. Riprova più tardi.",
+  "err_email_throttled": "Troppe prenotazioni con questi contatti. Riprova più tardi.",
   "err_required_field": "manca il campo obbligatorio %q",
   "err_required_checkbox": "%q deve essere selezionato",
   "err_invalid_option": "opzione non valida per %[1]q: %[2]q non è una scelta consentita",
@@ -163,10 +163,19 @@
   "time_evening": "Sera",
   "phone_call_number": "Telefono (facoltativo, per una chiamata)",
   "calendar_degraded_notice": "Non è stato possibile caricare alcune informazioni del calendario, quindi la disponibilità potrebbe essere incompleta.",
-
   "directory_book": "Prenota",
   "directory_empty": "Niente da prenotare al momento.",
   "directory_members": "Membri del team",
   "directory_person_subtitle": "Prenota del tempo con %s",
-  "directory_team_subtitle": "Prenota del tempo con il team %s"
+  "directory_team_subtitle": "Prenota del tempo con il team %s",
+  "contact_method_label": "Contatto principale",
+  "contact_phone_label": "Numero di telefono",
+  "contact_phone_hint": "Formato internazionale, es. +77011234567. Le email facoltative ricevono gli inviti. Non vengono inviati SMS.",
+  "contact_phone_option": "Telefono",
+  "contact_email_option": "Email",
+  "contact_saved_notice": "Salva il link privato per vedere i dettagli, spostare o annullare la prenotazione. Non vengono inviati SMS.",
+  "contact_manage_link": "Visualizza e gestisci prenotazione",
+  "contact_paid_notice": "Il pagamento potrebbe richiedere una email di fatturazione.",
+  "contact_copy_link": "Copia link privato",
+  "contact_invalid_error": "Inserisci il nome e un numero internazionale valido (es. +77011234567) oppure una email."
 }

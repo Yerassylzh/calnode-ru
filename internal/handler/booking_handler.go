@@ -487,23 +487,25 @@ var errPaymentRequired = errors.New("this event requires payment; please book on
 // the direct booking page (book.go) always had. A future caller now gets both is_active
 // and is_public enforced by construction, not by remembering to add the check.
 type bookableEventType struct {
-	AllowPhoneCall      bool
-	ID                  string
-	UserID              string
-	Name                string
-	DurationMinutes     int
-	SlotIntervalMinutes int
-	LocationType        string
-	LocationValue       *string
-	RoutingMode         string
-	RRStrategy          string
-	BufferBeforeMinutes int
-	BufferAfterMinutes  int
-	MinNoticeMinutes    int
-	MaxFutureDays       int
-	MaxActiveBookings   int
-	PriceCents          int
-	Currency            string
+	ContactPolicy        string
+	DefaultContactMethod string
+	AllowPhoneCall       bool
+	ID                   string
+	UserID               string
+	Name                 string
+	DurationMinutes      int
+	SlotIntervalMinutes  int
+	LocationType         string
+	LocationValue        *string
+	RoutingMode          string
+	RRStrategy           string
+	BufferBeforeMinutes  int
+	BufferAfterMinutes   int
+	MinNoticeMinutes     int
+	MaxFutureDays        int
+	MaxActiveBookings    int
+	PriceCents           int
+	Currency             string
 	// ShowTakenSlots opts this event type into returning the starts a booking removed,
 	// so the page can grey them out. Read by the public slots endpoint only: the MCP
 	// tool and the booking assistant must keep seeing bookable times and nothing else.
@@ -526,13 +528,13 @@ func (h *Handler) loadBookableEventType(ctx context.Context, slug string) (*book
 		       location_type, location_value, allow_phone_call, routing_mode, rr_strategy,
 		       buffer_before_minutes, buffer_after_minutes, min_notice_minutes, max_future_days,
 		       is_active, is_public, show_taken_slots, max_active_bookings, price_cents, currency,
-		       invite_delivery
+		       invite_delivery, booking_contact_policy, default_contact_method
 		FROM event_types WHERE slug = ?`, slug).
 		Scan(&et.ID, &et.UserID, &et.Name, &et.DurationMinutes, &et.SlotIntervalMinutes,
 			&et.LocationType, &et.LocationValue, &et.AllowPhoneCall, &et.RoutingMode, &et.RRStrategy,
 			&et.BufferBeforeMinutes, &et.BufferAfterMinutes, &et.MinNoticeMinutes, &et.MaxFutureDays,
 			&isActive, &isPublic, &showTaken, &et.MaxActiveBookings, &et.PriceCents, &et.Currency,
-			&et.InviteDelivery)
+			&et.InviteDelivery, &et.ContactPolicy, &et.DefaultContactMethod)
 	if err != nil || isActive == 0 || isPublic == 0 {
 		return nil, errEventTypeNotFound
 	}
@@ -552,14 +554,16 @@ func (h *Handler) createBookingForSlug(ctx context.Context, slug string, startAt
 	// extraction from booker chat, or an MCP client's tool arguments — so it is checked
 	// here, once, rather than in each of them. (The REST handler does not come through
 	// this core; it normalises at its own intake, before its throttle reads the value.)
-	email, err := normalizeBookerEmail(organizer.Email)
+	organizer, err := booking.NormalizeContact(organizer)
 	if err != nil {
 		return nil, err
 	}
-	organizer.Email = email
 
 	et, err := h.loadBookableEventType(ctx, slug)
 	if err != nil {
+		return nil, err
+	}
+	if err := booking.ValidateContactPolicy(et.ContactPolicy, organizer.ContactMethod); err != nil {
 		return nil, err
 	}
 	// Paid events require the Stripe Checkout flow (booking page only) — agents/assistant
@@ -625,6 +629,7 @@ func (h *Handler) createBookingForSlug(ctx context.Context, slug string, startAt
 		LocationType:      et.LocationType,
 		OrganizerName:     organizer.Name,
 		OrganizerEmail:    organizer.Email,
+		OrganizerPhone:    organizer.Phone,
 		OrganizerTimezone: organizer.IANATimezone,
 		OrganizerLocale:   organizer.Locale,
 	})
@@ -632,11 +637,15 @@ func (h *Handler) createBookingForSlug(ctx context.Context, slug string, startAt
 }
 
 type attendeeJSON struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	Phone         string `json:"phone"`
+	ContactMethod string `json:"contact_method"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
 }
 
 type bookingJSON struct {
+	ManageURL          string `json:"manage_url,omitempty"`
+	ContactMethod      string `json:"contact_method,omitempty"`
 	ID                 string `json:"id"`
 	EventTypeID        string `json:"event_type_id"`
 	EventTypeSlug      string `json:"event_type_slug,omitempty"`
@@ -730,6 +739,8 @@ func (h *Handler) noConnectedDestination(ctx context.Context, hostID string) boo
 // Phase 1: host is always event_type.user_id. Team routing (round_robin,
 // collective with multiple hosts) will be added when team CRUD lands.
 func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 
 	rawBody, err := io.ReadAll(r.Body)
@@ -744,6 +755,8 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		Name          string `json:"name"`
 		Email         string `json:"email"`
 		Phone         string `json:"phone"`
+		ContactPhone  string `json:"contact_phone"`
+		ContactMethod string `json:"contact_method"`
 		Timezone      string `json:"timezone"`
 		// Language is the resolved page locale code (e.g. "es") the client already knows —
 		// sent explicitly rather than re-derived from Accept-Language/cookie server-side,
@@ -823,19 +836,19 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	// are reachable only by a broken client and read as API diagnostics, not UI copy.
 	loc := i18n.Resolve("", req.Language)
 
-	if req.EventTypeSlug == "" || req.StartAt == "" || req.Name == "" || req.Email == "" {
-		h.writeError(w, http.StatusBadRequest, "event_type_slug, start_at, name, and email are required")
+	if req.EventTypeSlug == "" || req.StartAt == "" || req.Name == "" {
+		h.writeError(w, http.StatusBadRequest, "event_type_slug, start_at, and name are required")
 		return
 	}
 	// Normalise before anything reads req.Email — the hourly throttle, the Stripe
 	// Checkout session, the attendee row and the confirmation email all take it from
 	// here, and they must all see the same bare address.
-	email, err := normalizeBookerEmail(req.Email)
+	organizer, err := booking.NormalizeContact(booking.Attendee{Name: req.Name, Email: req.Email, Phone: req.ContactPhone, ContactMethod: req.ContactMethod})
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, err.Error())
+		h.writeContactError(w, err)
 		return
 	}
-	req.Email = email
+	req.Name, req.Email, req.ContactPhone, req.ContactMethod = organizer.Name, organizer.Email, organizer.Phone, organizer.ContactMethod
 	if req.Timezone == "" {
 		req.Timezone = "UTC"
 	}
@@ -852,6 +865,10 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := booking.ValidateContactPolicy(et.ContactPolicy, req.ContactMethod); err != nil {
+		h.writeContactError(w, err)
+		return
+	}
 	// Per-email throttle: cap how many bookings one email can create across the
 	// workspace in a rolling hour, independent of IP — backstops the per-IP rate
 	// limit against a single identity spamming via rotating IPs. Enforced inside
@@ -864,8 +881,8 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		if err := h.db.QueryRowContext(r.Context(), `
 			SELECT COUNT(*) FROM bookings b
 			JOIN booking_attendees a ON a.booking_id = b.id AND a.is_organizer = 1
-			WHERE a.email = ? COLLATE NOCASE AND b.created_at > ?`,
-			req.Email, windowStart).Scan(&recent); err != nil {
+			WHERE ((? != '' AND a.email = ? COLLATE NOCASE) OR (? != '' AND a.phone = ?)) AND b.created_at > ?`,
+			req.Email, req.Email, req.ContactPhone, req.ContactPhone, windowStart).Scan(&recent); err != nil {
 			h.logger.ErrorContext(r.Context(), "create booking: per-email throttle", "error", err)
 		} else if recent >= maxBookingsPerEmailPerHour {
 			h.writeError(w, http.StatusTooManyRequests, loc.T("err_email_throttled"))
@@ -944,10 +961,12 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		LocationValue: locValue,
 		LocationType:  et.LocationType,
 		Organizer: booking.Attendee{
-			Name:         req.Name,
-			Email:        req.Email,
-			IANATimezone: req.Timezone,
-			Locale:       i18n.Resolve("", req.Language).Code,
+			Name:          req.Name,
+			Phone:         req.ContactPhone,
+			ContactMethod: req.ContactMethod,
+			Email:         req.Email,
+			IANATimezone:  req.Timezone,
+			Locale:        i18n.Resolve("", req.Language).Code,
 		},
 		Answers:             answers,
 		MaxActivePerInvitee: et.MaxActiveBookings,
@@ -961,6 +980,10 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, booking.ErrEmailThrottled) {
 			h.writeError(w, http.StatusTooManyRequests, loc.T("err_email_throttled"))
+			return
+		}
+		if errors.Is(err, booking.ErrInvalidContact) {
+			h.writeContactError(w, err)
 			return
 		}
 		// Not 409 — the booking page treats 409 as "slot taken". Use 422 so its
@@ -992,7 +1015,7 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusServiceUnavailable, "payments are temporarily unavailable")
 			return
 		}
-		checkoutURL, err := h.startBookingCheckout(r.Context(), sc, b.ID, et.PriceCents, et.Currency, et.Name, req.EventTypeSlug, req.Email)
+		checkoutURL, err := h.startBookingCheckout(r.Context(), sc, b.ID, et.PriceCents, et.Currency, et.Name, req.EventTypeSlug, req.Email, b.ManageToken)
 		if err != nil {
 			h.logger.ErrorContext(r.Context(), "create booking: start checkout", "error", err, "booking_id", b.ID)
 			_ = h.bookingSvc.CancelByID(r.Context(), b.ID, "checkout failed")
@@ -1016,7 +1039,7 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bj := toBookingJSON(b)
+	bj := h.createdBookingJSON(b)
 	for _, hd := range h.displayHostsForBooking(r.Context(), b.ID) {
 		bj.Hosts = append(bj.Hosts, hostBrief{ID: hd.ID, Name: hd.Name, AvatarURL: hd.AvatarURL})
 	}
@@ -1048,6 +1071,7 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		LocationType:      et.LocationType,
 		OrganizerName:     req.Name,
 		OrganizerEmail:    req.Email,
+		OrganizerPhone:    req.ContactPhone,
 		OrganizerTimezone: req.Timezone,
 		OrganizerLocale:   i18n.Resolve("", req.Language).Code,
 	})
@@ -1056,6 +1080,7 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 // bookingConfirmationInput carries the event-type and organizer details that the
 // post-create side effects need but that aren't stored on the booking row.
 type bookingConfirmationInput struct {
+	OrganizerPhone    string
 	EventTypeName     string
 	EventTypeSlug     string
 	LocationType      string
@@ -1338,6 +1363,7 @@ func (h *Handler) dispatchBookingConfirmation(b *booking.Booking, in bookingConf
 		EventTypeSlug:     in.EventTypeSlug,
 		OrganizerName:     in.OrganizerName,
 		OrganizerEmail:    in.OrganizerEmail,
+		OrganizerPhone:    in.OrganizerPhone,
 		OrganizerTimezone: in.OrganizerTimezone,
 		StartAt:           b.StartAt,
 		EndAt:             b.EndAt,
@@ -1356,7 +1382,9 @@ func (h *Handler) dispatchBookingConfirmation(b *booking.Booking, in bookingConf
 			Scan(&fb.Name, &fb.Email)
 		hosts = []assignedHost{fb}
 	}
-	if tok, err := h.bookingSvc.IssueManageToken(ctx, b.ID); err != nil {
+	if b.ManageToken != "" {
+		bData.ManageURL = h.publicURL() + "/manage/" + b.ManageToken
+	} else if tok, err := h.bookingSvc.IssueManageToken(ctx, b.ID); err != nil {
 		h.logger.Error("issue manage token", "error", err, "booking_id", b.ID)
 	} else {
 		bData.ManageURL = h.publicURL() + "/manage/" + tok
@@ -1380,7 +1408,7 @@ func (h *Handler) dispatchBookingConfirmation(b *booking.Booking, in bookingConf
 	h.applyInviteDelivery(ctx, &bData, b.InviteDelivery, b.HostID)
 	bData.ICSSequence = int(b.UpdatedAt.Unix())
 	confirmFailed := hostFailed
-	if primaryPrefs.NotifyConfirmation {
+	if primaryPrefs.NotifyConfirmation && in.OrganizerEmail != "" {
 		if err := sendWithRetry(ctx, h.logger, b.ID, "attendee", func() error {
 			return mailer.SendConfirmationToAttendee(ctx, h.mailer, bData)
 		}); err != nil {
@@ -1637,19 +1665,19 @@ func (h *Handler) enrichBookings(ctx context.Context, bookings []booking.Booking
 	// Organizer attendee. Three columns, so it doesn't fit scanPairs; ph is a generated
 	// run of "?" and every id is bound.
 	rows, err := h.db.QueryContext(ctx, // #nosec G701 -- ph is placeholders(), a generated run of "?"; every value is bound via ids..., never concatenated into the SQL text
-		`SELECT booking_id, name, email FROM booking_attendees
+		`SELECT booking_id, name, email, phone, contact_method FROM booking_attendees
 		 WHERE booking_id IN (`+ph+`) AND is_organizer = 1`, ids...) // #nosec G202 -- ph is a generated run of "?" placeholders; every value is bound via ids...
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var bid, name, email string
-		if err := rows.Scan(&bid, &name, &email); err != nil {
+		var bid, name, email, phone, method string
+		if err := rows.Scan(&bid, &name, &email, &phone, &method); err != nil {
 			continue
 		}
 		if i, ok := idxByID[bid]; ok {
-			items[i].Attendees = append(items[i].Attendees, attendeeJSON{Name: name, Email: email})
+			items[i].Attendees = append(items[i].Attendees, attendeeJSON{Name: name, Email: email, Phone: phone, ContactMethod: method})
 		}
 	}
 	return items, rows.Err()
@@ -2061,9 +2089,9 @@ func (h *Handler) loadCancellationData(ctx context.Context, b *booking.Booking) 
 	// Organizer attendee.
 	var locale string
 	_ = h.db.QueryRowContext(ctx, `
-		SELECT name, email, iana_timezone, locale
+		SELECT name, email, iana_timezone, locale, phone
 		FROM booking_attendees WHERE booking_id = ? AND is_organizer = 1`, b.ID).
-		Scan(&d.OrganizerName, &d.OrganizerEmail, &d.OrganizerTimezone, &locale)
+		Scan(&d.OrganizerName, &d.OrganizerEmail, &d.OrganizerTimezone, &locale, &d.OrganizerPhone)
 	d.Locale = i18n.Get(locale)
 
 	return d, nil
@@ -2128,6 +2156,13 @@ func (h *Handler) enqueueReminder(ctx context.Context, bookingID string, startAt
 // enqueueBookingReminders loads the event type's reminder list and enqueues one job per
 // entry. Falls back to a single 24-hour reminder when no explicit list is configured.
 func (h *Handler) enqueueBookingReminders(ctx context.Context, etID, bookingID string, startAt time.Time) error {
+	var email string
+	if err := h.db.QueryRowContext(ctx, "SELECT email FROM booking_attendees WHERE booking_id = ? AND is_organizer = 1", bookingID).Scan(&email); err != nil {
+		return err
+	}
+	if email == "" {
+		return nil
+	}
 	rows, err := h.db.QueryContext(ctx,
 		`SELECT hours_before FROM event_type_reminders WHERE event_type_id = ? ORDER BY hours_before DESC`, etID)
 	if err != nil {
@@ -2162,6 +2197,14 @@ func (h *Handler) enqueueBookingReminders(ctx context.Context, etID, bookingID s
 // booking and inserts fresh ones based on the event type's configured reminder
 // list. Falls back to a single 24-hour reminder when no explicit list is set.
 func (h *Handler) replaceReminderJobs(ctx context.Context, bookingID, etID string, newStart time.Time) error {
+	var email string
+	if err := h.db.QueryRowContext(ctx, "SELECT email FROM booking_attendees WHERE booking_id = ? AND is_organizer = 1", bookingID).Scan(&email); err != nil {
+		return err
+	}
+	if email == "" {
+		_, err := h.db.ExecContext(ctx, "DELETE FROM jobs WHERE type = 'reminder.send' AND json_extract(payload, '$.booking_id') = ? AND status != 'running'", bookingID)
+		return err
+	}
 	// Load the hours list first (read-only, outside the write transaction).
 	rows, err := h.db.QueryContext(ctx,
 		`SELECT hours_before FROM event_type_reminders WHERE event_type_id = ? ORDER BY hours_before DESC`, etID)

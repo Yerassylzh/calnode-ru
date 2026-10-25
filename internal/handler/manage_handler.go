@@ -82,6 +82,8 @@ type managePageData struct {
 
 // ManagePage renders the attendee manage page for a booking (reschedule / cancel).
 func (h *Handler) ManagePage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	token := r.PathValue("token")
 
 	b, err := h.bookingSvc.ValidateManageToken(r.Context(), token)
@@ -95,6 +97,26 @@ func (h *Handler) ManagePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if sessionID := r.URL.Query().Get("checkout_session_id"); sessionID != "" {
+		sc := h.getStripe()
+		if sc == nil {
+			http.Error(w, "payments unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		session, err := sc.GetCheckoutSession(r.Context(), sessionID)
+		var storedID string
+		if err != nil {
+			http.Error(w, "could not verify payment", http.StatusBadGateway)
+			return
+		}
+		if err := h.db.QueryRowContext(r.Context(), "SELECT COALESCE(stripe_session_id, '') FROM bookings WHERE id = ?", b.ID).Scan(&storedID); err != nil || storedID != session.ID || session.Metadata["booking_id"] != b.ID || session.PaymentStatus != "paid" {
+			http.Error(w, "payment not confirmed", http.StatusBadRequest)
+			return
+		}
+		h.confirmPaidBooking(r.Context(), b.ID, session.PaymentIntent, int(session.AmountTotal), session.Currency)
+		http.Redirect(w, r, "/manage/"+token, http.StatusSeeOther)
+		return
+	}
 	var etName, etSlug, locType, locValue string
 	var durMins, maxDays, minNotice int
 	var hostName, accentColor string
@@ -169,7 +191,7 @@ func (h *Handler) ManagePage(w http.ResponseWriter, r *http.Request) {
 // template. loc is the request's already-resolved locale — the caller resolves it (a DB
 // read for the operator's fallback setting), so this doesn't redundantly re-resolve it.
 func (h *Handler) renderManage(w http.ResponseWriter, r *http.Request, data managePageData, loc *i18n.Locale) {
-	track := h.loadTrackingSettings(r.Context())
+	track := trackingSettings{} // Capability URLs must never enter third-party tracking.
 	dlFields, _ := json.Marshal(track.DataLayerFields)
 	data.HeadHTML = template.HTML(track.HeadHTML) // #nosec G203 -- admin-only "code injection" feature (Settings -> Tracking); intentionally raw, documented, gated by requireAdmin on the settings endpoint
 	data.DataLayerEnabled = track.DataLayerEnabled
@@ -276,7 +298,8 @@ func (h *Handler) RescheduleByToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeJSON(w, http.StatusOK, toBookingJSON(updated))
+	w.Header().Set("Cache-Control", "no-store")
+	h.writeJSON(w, http.StatusOK, h.createdBookingJSON(updated))
 
 	go h.rescheduleSideEffects(*updated, b.EventTypeID, previousStart, previousEnd) // #nosec G118 -- deliberately its own context.Background(); see rescheduleSideEffects' doc comment
 }
@@ -311,7 +334,9 @@ func (h *Handler) rescheduleSideEffects(bCopy booking.Booking, capturedEtID stri
 	h.rescheduleZoomMeeting(ctx, &bCopy)
 
 	// Rotate the token so the original confirmation-email link is invalidated.
-	if tok, err := h.bookingSvc.RotateManageToken(ctx, bCopy.ID); err == nil {
+	if bCopy.ManageToken != "" {
+		d.ManageURL = h.publicURL() + "/manage/" + bCopy.ManageToken
+	} else if tok, err := h.bookingSvc.RotateManageToken(ctx, bCopy.ID); err == nil {
 		d.ManageURL = h.publicURL() + "/manage/" + tok
 	}
 	h.applyInviteDelivery(ctx, &d, bCopy.InviteDelivery, bCopy.HostID)

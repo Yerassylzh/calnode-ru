@@ -44,18 +44,20 @@ type bookQuestion struct {
 }
 
 type bookPageData struct {
-	PhoneChoice      bool
-	AccentColor      string
-	AccentForeground string
-	Slug             string
-	Name             string
-	Description      template.HTML
-	DurationLabel    string
-	HostName         string
-	HostInitial      string
-	AvatarURL        string
-	Hosts            []hostDisplay // faces for the info panel (1 = single, >1 = group stack)
-	HostsLabel       string        // "Alex, Sam & 2 others" for the group case
+	ContactPolicy        string
+	DefaultContactMethod string
+	PhoneChoice          bool
+	AccentColor          string
+	AccentForeground     string
+	Slug                 string
+	Name                 string
+	Description          template.HTML
+	DurationLabel        string
+	HostName             string
+	HostInitial          string
+	AvatarURL            string
+	Hosts                []hostDisplay // faces for the info panel (1 = single, >1 = group stack)
+	HostsLabel           string        // "Alex, Sam & 2 others" for the group case
 	// SoleHostName is the host's name when this event type has exactly one, and "" when
 	// it has several. It is what lets an empty day read "Alex has no available times on
 	// …": a group label ("Alex, Sam & 2 others") in that sentence would need a plural
@@ -323,17 +325,18 @@ func (h *Handler) PublicEventType(w http.ResponseWriter, r *http.Request) {
 		durMins, maxDays, minNotice, priceCents    int
 		msgGreeting                                sql.NullString
 		allowPhoneCall                             bool
+		contactPolicy, defaultContactMethod        string
 		accentColor                                string
 	)
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT et.id, et.name, COALESCE(et.description, ''),
 		       et.duration_minutes, et.location_type, COALESCE(et.location_value, ''),
 		       et.max_future_days, et.min_notice_minutes, et.routing_mode, u.name, COALESCE(u.avatar_url, ''),
-		       et.price_cents, et.currency, et.msg_greeting, et.allow_phone_call, u.booking_accent
+		       et.price_cents, et.currency, et.msg_greeting, et.allow_phone_call, u.booking_accent, et.booking_contact_policy, et.default_contact_method
 		FROM event_types et
 		JOIN users u ON u.id = et.user_id
 		WHERE et.slug = ? AND et.is_active = 1 AND et.is_public = 1`,
-		slug).Scan(&etID, &name, &description, &durMins, &locType, &locValue, &maxDays, &minNotice, &routingMode, &hostName, &avatarURL, &priceCents, &currency, &msgGreeting, &allowPhoneCall, &accentColor)
+		slug).Scan(&etID, &name, &description, &durMins, &locType, &locValue, &maxDays, &minNotice, &routingMode, &hostName, &avatarURL, &priceCents, &currency, &msgGreeting, &allowPhoneCall, &accentColor, &contactPolicy, &defaultContactMethod)
 	if errors.Is(err, sql.ErrNoRows) {
 		h.writeError(w, http.StatusNotFound, "event type not found")
 		return
@@ -384,10 +387,12 @@ func (h *Handler) PublicEventType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeJSON(w, http.StatusOK, map[string]any{
-		"slug":             slug,
-		"name":             name,
-		"description":      description,
-		"duration_minutes": durMins,
+		"booking_contact_policy": contactPolicy,
+		"default_contact_method": defaultContactMethod,
+		"slug":                   slug,
+		"name":                   name,
+		"description":            description,
+		"duration_minutes":       durMins,
 		// duration_label is the translated, human form ("30 min", "1 hour", "1 hora") —
 		// the same server-computed label book.html/manage.html render, so the widget
 		// doesn't have to rebuild it from duration_minutes (it used to hardcode " min",
@@ -424,32 +429,33 @@ func (h *Handler) BookPage(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 
 	var (
-		etID           string
-		name           string
-		description    string
-		durMins        int
-		locType        string
-		locValue       string
-		maxDays        int
-		minNotice      int
-		hostName       string
-		avatarURL      string
-		routingMode    string
-		priceCents     int
-		currency       string
-		msgGreeting    sql.NullString
-		allowPhoneCall bool
-		accentColor    string
+		etID                                string
+		name                                string
+		description                         string
+		durMins                             int
+		locType                             string
+		locValue                            string
+		maxDays                             int
+		minNotice                           int
+		hostName                            string
+		avatarURL                           string
+		routingMode                         string
+		priceCents                          int
+		currency                            string
+		msgGreeting                         sql.NullString
+		allowPhoneCall                      bool
+		contactPolicy, defaultContactMethod string
+		accentColor                         string
 	)
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT et.id, et.name, COALESCE(et.description, ''),
 		       et.duration_minutes, et.location_type, COALESCE(et.location_value, ''),
 		       et.max_future_days, et.min_notice_minutes, et.routing_mode, u.name, COALESCE(u.avatar_url, ''),
-		       et.price_cents, et.currency, et.msg_greeting, et.allow_phone_call, u.booking_accent
+		       et.price_cents, et.currency, et.msg_greeting, et.allow_phone_call, u.booking_accent, et.booking_contact_policy, et.default_contact_method
 		FROM event_types et
 		JOIN users u ON u.id = et.user_id
 		WHERE et.slug = ? AND et.is_active = 1 AND et.is_public = 1`,
-		slug).Scan(&etID, &name, &description, &durMins, &locType, &locValue, &maxDays, &minNotice, &routingMode, &hostName, &avatarURL, &priceCents, &currency, &msgGreeting, &allowPhoneCall, &accentColor)
+		slug).Scan(&etID, &name, &description, &durMins, &locType, &locValue, &maxDays, &minNotice, &routingMode, &hostName, &avatarURL, &priceCents, &currency, &msgGreeting, &allowPhoneCall, &accentColor, &contactPolicy, &defaultContactMethod)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "Page not found", http.StatusNotFound)
@@ -512,34 +518,36 @@ func (h *Handler) BookPage(w http.ResponseWriter, r *http.Request) {
 	i18nJSON, _ := loc.JSON()
 
 	data := bookPageData{
-		PhoneChoice:         allowPhoneCall && onlineMeetingLocation(locType),
-		AccentColor:         accentColor,
-		AccentForeground:    accentForeground(accentColor),
-		Slug:                slug,
-		Name:                name,
-		Description:         renderMarkdown(description),
-		DurationLabel:       durationLabel(durMins, loc),
-		HostName:            hosts[0].Name,
-		HostInitial:         hosts[0].Initial,
-		AvatarURL:           hosts[0].AvatarURL,
-		Hosts:               hosts,
-		HostsLabel:          hostsLabel(hosts, loc),
-		SoleHostName:        soleHostName(hosts),
-		MinNoticeLabel:      noticeLabel(minNotice, loc),
-		LocationLabel:       locationLabel(locType, locValue, loc),
-		PriceLabel:          formatPrice(priceCents, currency),
-		Locale:              loc.Code,
-		T:                   loc.T,
-		I18NJSON:            template.JS(i18nJSON), // #nosec G203 -- json.Marshal output, which escapes <,>,& by default; safe for embedding in a <script> block
-		PriceCents:          priceCents,
-		Currency:            currency,
-		MaxFutureDays:       maxDays,
-		Questions:           questions,
-		BookingLogicJS:      template.JS(bookingLogicJS), // #nosec G203 -- our own bundled JS source constant, not user input
-		AssistantEnabled:    h.getLLM() != nil,
-		AssistantDisclosure: loc.T("assistant_disclosure"),
-		AssistantGreeting:   assistantGreeting(msgGreeting, loc),
-		CSSVersion:          bookingCSSVersion,
+		ContactPolicy:        contactPolicy,
+		DefaultContactMethod: defaultContactMethod,
+		PhoneChoice:          allowPhoneCall && onlineMeetingLocation(locType),
+		AccentColor:          accentColor,
+		AccentForeground:     accentForeground(accentColor),
+		Slug:                 slug,
+		Name:                 name,
+		Description:          renderMarkdown(description),
+		DurationLabel:        durationLabel(durMins, loc),
+		HostName:             hosts[0].Name,
+		HostInitial:          hosts[0].Initial,
+		AvatarURL:            hosts[0].AvatarURL,
+		Hosts:                hosts,
+		HostsLabel:           hostsLabel(hosts, loc),
+		SoleHostName:         soleHostName(hosts),
+		MinNoticeLabel:       noticeLabel(minNotice, loc),
+		LocationLabel:        locationLabel(locType, locValue, loc),
+		PriceLabel:           formatPrice(priceCents, currency),
+		Locale:               loc.Code,
+		T:                    loc.T,
+		I18NJSON:             template.JS(i18nJSON), // #nosec G203 -- json.Marshal output, which escapes <,>,& by default; safe for embedding in a <script> block
+		PriceCents:           priceCents,
+		Currency:             currency,
+		MaxFutureDays:        maxDays,
+		Questions:            questions,
+		BookingLogicJS:       template.JS(bookingLogicJS), // #nosec G203 -- our own bundled JS source constant, not user input
+		AssistantEnabled:     h.getLLM() != nil,
+		AssistantDisclosure:  loc.T("assistant_disclosure"),
+		AssistantGreeting:    assistantGreeting(msgGreeting, loc),
+		CSSVersion:           bookingCSSVersion,
 
 		HeadHTML:         template.HTML(track.HeadHTML), // #nosec G203 -- admin-only "code injection" feature (Settings -> Tracking); intentionally raw, documented, gated by requireAdmin on the settings endpoint
 		GTMContainerID:   track.GTMContainerID,

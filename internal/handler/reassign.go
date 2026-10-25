@@ -29,7 +29,7 @@ func (h *Handler) ListUserUpcomingBookings(w http.ResponseWriter, r *http.Reques
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT b.id, b.start_at, b.end_at, et.name, et.slug,
-		       COALESCE(a.name,''), COALESCE(a.email,'')
+		       COALESCE(a.name,''), COALESCE(a.email,''), COALESCE(a.phone,''), COALESCE(a.contact_method,'email')
 		FROM bookings b
 		JOIN event_types et ON et.id = b.event_type_id
 		LEFT JOIN booking_attendees a ON a.booking_id = b.id AND a.is_organizer = 1
@@ -50,12 +50,14 @@ func (h *Handler) ListUserUpcomingBookings(w http.ResponseWriter, r *http.Reques
 		EventTypeSlug string `json:"event_type_slug"`
 		AttendeeName  string `json:"attendee_name"`
 		AttendeeEmail string `json:"attendee_email"`
+		AttendeePhone string `json:"attendee_phone"`
+		ContactMethod string `json:"contact_method"`
 	}
 	out := []row{}
 	for rows.Next() {
 		var x row
 		if err := rows.Scan(&x.ID, &x.StartAt, &x.EndAt, &x.EventTypeName, &x.EventTypeSlug,
-			&x.AttendeeName, &x.AttendeeEmail); err != nil {
+			&x.AttendeeName, &x.AttendeeEmail, &x.AttendeePhone, &x.ContactMethod); err != nil {
 			continue
 		}
 		out = append(out, x)

@@ -585,6 +585,8 @@ body {
         btn.disabled = false; btn.textContent = t('confirm_reschedule'); return;
       }
       $('success-new-time').textContent = fmtDate(pickedDate) + ' · ' + fmtTime(pickedSlot.start);
+      const updated = await r.json();
+      if (updated.manage_url) { window.location.assign(updated.manage_url); return; }
       showView('success-reschedule-view');
       if (window.__CALNODE_DL && typeof calnodePush === 'function') {
         calnodePush('calnode_booking_rescheduled', {

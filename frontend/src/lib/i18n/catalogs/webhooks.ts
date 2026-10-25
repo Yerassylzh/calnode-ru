@@ -3,6 +3,8 @@
 import type { CatalogEntry } from '../index';
 
 export const en: Record<string, CatalogEntry> = {
+	"webhooks.fields.attendeePhone": "Attendee phone number",
+	"webhooks.fields.contactMethod": "Primary contact method",
 	'webhooks.pageTitle': 'Webhooks — Calnode',
 	'webhooks.heading': 'Webhooks',
 	'webhooks.subtitle': 'Receive real-time notifications for booking events.',
@@ -81,6 +83,8 @@ export const en: Record<string, CatalogEntry> = {
 };
 
 export const ru: Record<string, CatalogEntry> = {
+	"webhooks.fields.attendeePhone": "Телефон посетителя",
+	"webhooks.fields.contactMethod": "Основной способ связи",
 	'webhooks.pageTitle': 'Вебхуки — Calnode',
 	'webhooks.heading': 'Вебхуки',
 	'webhooks.subtitle': 'Получайте уведомления о событиях бронирования в реальном времени.',

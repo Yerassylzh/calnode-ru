@@ -284,6 +284,8 @@
 	let testSent    = $state<Partial<Record<MsgKey, boolean>>>({});
 	let testError   = $state<Partial<Record<MsgKey, string>>>({});
 
+	let contactPolicy = $state('email_or_phone');
+	let defaultContactMethod = $state('phone');
 	let allowPhoneCall = $state(false);
 	const slug = $page.params.slug;
 
@@ -292,6 +294,8 @@
 		try {
 			et = await api.get<EventType>(`/v1/event-types/${slug}`);
 			allowPhoneCall = et.allow_phone_call;
+			contactPolicy = et.booking_contact_policy;
+			defaultContactMethod = et.default_contact_method;
 			form = {
 				display_order: et.display_order,
 				name: et.name,
@@ -365,6 +369,8 @@
 				show_taken_slots: form.show_taken_slots,
 				invite_delivery: form.invite_delivery,
 				allow_phone_call: allowPhoneCall,
+				booking_contact_policy: contactPolicy,
+				default_contact_method: contactPolicy === 'email_or_phone' ? defaultContactMethod : contactPolicy === 'phone_only' ? 'phone' : 'email',
 				location_type: form.location_type,
 				location_value: form.location_value.trim() || null,
 				buffer_before_minutes: Number(form.buffer_before_minutes),
@@ -666,6 +672,28 @@
 		{#if isOnlineMeeting(form.location_type)}
 			<label class="flex items-center gap-3 text-sm"><input type="checkbox" bind:checked={allowPhoneCall} />{$t('eventTypeDetail.checkboxPhoneCall')}</label>
 		{/if}
+        <div class="mt-6 space-y-3 border-t pt-5">
+          <Label for="contact-policy">{$t('eventTypeDetail.contactPolicy')}</Label>
+          <Select.Root type="single" bind:value={contactPolicy}>
+            <Select.Trigger id="contact-policy" class="w-full">{$t('eventTypeDetail.contactPolicy.' + contactPolicy)}</Select.Trigger>
+            <Select.Content>
+              {#each ['email_or_phone', 'phone_only', 'email_only'] as policy}
+                <Select.Item value={policy}>{$t('eventTypeDetail.contactPolicy.' + policy)}</Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
+          {#if contactPolicy === 'email_or_phone'}
+            <Label for="contact-default">{$t('eventTypeDetail.contactDefault')}</Label>
+            <Select.Root type="single" bind:value={defaultContactMethod}>
+              <Select.Trigger id="contact-default" class="w-full">{$t('eventTypeDetail.contactDefault.' + defaultContactMethod)}</Select.Trigger>
+              <Select.Content>
+                <Select.Item value="phone">{$t('eventTypeDetail.contactDefault.phone')}</Select.Item>
+                <Select.Item value="email">{$t('eventTypeDetail.contactDefault.email')}</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          {/if}
+          <p class="text-xs text-muted-foreground">{$t('eventTypeDetail.contactHelp')}</p>
+        </div>
 		<!-- Location -->
 		<div class="mt-6 border-t pt-5">
 			<p class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{$t('eventTypeDetail.fieldLocation')}</p>

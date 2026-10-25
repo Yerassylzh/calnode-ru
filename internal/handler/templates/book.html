@@ -198,8 +198,21 @@ body {
           <input id="f-name" name="name" type="text" required autocomplete="name" placeholder="{{call .T "name_placeholder"}}">
         </div>
         <div class="field">
+          <label for="f-contact-method">{{call .T "contact_method_label"}}</label>
+          <select id="f-contact-method" name="contact_method">
+            {{if ne .ContactPolicy "email_only"}}<option value="phone"{{if eq .DefaultContactMethod "phone"}} selected{{end}}>{{call .T "contact_phone_option"}}</option>{{end}}
+            {{if ne .ContactPolicy "phone_only"}}<option value="email"{{if eq .DefaultContactMethod "email"}} selected{{end}}>{{call .T "contact_email_option"}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-contact-phone">{{call .T "contact_phone_label"}}</label>
+          <input id="f-contact-phone" name="contact_phone" type="tel" maxlength="64" autocomplete="tel" inputmode="tel" placeholder="+77011234567" aria-describedby="contact-hint">
+          <p id="contact-hint" class="sub">{{call .T "contact_phone_hint"}}</p>
+        </div>
+        {{if .PriceLabel}}<p class="sub">{{call .T "contact_paid_notice"}}</p>{{end}}
+        <div class="field">
           <label for="f-email">{{call .T "email_label"}}</label>
-          <input id="f-email" name="email" type="email" required autocomplete="email" placeholder="{{call .T "email_placeholder"}}">
+          <input id="f-email" name="email" type="email" autocomplete="email" placeholder="{{call .T "email_placeholder"}}">
         </div>
         {{/* SAFE (generic.html-templates.security.unquoted-attribute-var, this whole block):
              .ID is the event type's own intake-question primary key (admin-configured, not
@@ -248,7 +261,8 @@ body {
       <div class="confirm-view">
         <h3>{{call .T "booking_confirmed"}}</h3>
         <p class="when" id="confirm-time"></p>
-        <p class="sub">{{call .T "confirmation_email_sent"}}</p>
+        <p class="sub" id="contact-confirmation">{{call .T "contact_saved_notice"}}</p>
+        <a id="booking-manage-link" class="btn-primary hidden" rel="noreferrer">{{call .T "contact_manage_link"}}</a>
       </div>
     </div>
 
@@ -662,6 +676,13 @@ body {
   $('cal-back-btn').addEventListener('click', () => setStep('cal'));
 
   // ── Booking form ──────────────────────────────────────────────────────────
+  const contactForm = $('booking-form');
+  function syncContact() {
+    contactForm.email.required = contactForm.contact_method.value === 'email';
+    contactForm.contact_phone.required = contactForm.contact_method.value === 'phone';
+  }
+  contactForm.contact_method.addEventListener('change', syncContact);
+  syncContact();
   $('booking-form').addEventListener('submit', async e => {
     e.preventDefault();
     if (!pickedSlot) return;
@@ -669,7 +690,7 @@ body {
     const btn   = $('submit-btn');
     const errEl = $('form-error');
 
-    if (!form.name.value.trim() || !form.email.value.trim()) {
+    if (!form.name.value.trim() || !form.reportValidity()) {
       errEl.textContent = t('required_fields_error');
       return;
     }
@@ -709,6 +730,8 @@ body {
           start_at: pickedSlot.start,
           name: form.name.value.trim(),
           email: form.email.value.trim(),
+          contact_method: form.contact_method.value,
+          contact_phone: form.contact_phone.value.trim(),
           phone: form.elements.phone?.value.trim() || "",
           timezone: TZ,
           language: LOCALE,
@@ -739,6 +762,7 @@ body {
       // matters for round-robin 'even', and includes any optional Group hosts who
       // joined). Falls back to the slot's best-effort face if the body is unusable.
       const booked = await r.json().catch(() => null);
+      if (booked && booked.manage_url) { const link = $('booking-manage-link'); link.href = booked.manage_url; link.classList.remove('hidden'); }
       // Paid event types: the server holds the slot and returns a Stripe Checkout URL —
       // redirect there to pay. The booking is confirmed by webhook once payment completes.
       if (booked && booked.checkout_url) { window.location.href = booked.checkout_url; return; }
@@ -935,6 +959,10 @@ body {
       if (botEl && botEl.textContent) {
         messages.push({ role: 'assistant', content: botEl.textContent });
         if (booking) botEl.className = 'asst-msg ok';
+        if (booking && booking.manage_url) {
+          const link = document.createElement('a'); link.href = booking.manage_url; link.rel = 'noreferrer'; link.textContent = t('contact_manage_link');
+          (botEl || typing).appendChild(link);
+        }
       }
       if (booking && typeof calnodePush === 'function') {
         calnodePush('calnode_booking_confirmed', { booking_id: booking.id, via: 'assistant' });

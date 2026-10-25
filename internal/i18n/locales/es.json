@@ -41,7 +41,6 @@
   "list_separator": ", ",
   "list_conjunction": " y ",
   "language_switcher_aria": "Idioma",
-
   "cookie_consent_aria": "Consentimiento de cookies",
   "cookie_text": "Usamos cookies analíticas para entender cómo se usa esta página de reservas; solo se activan si aceptas.",
   "privacy_policy": "Política de privacidad",
@@ -56,7 +55,6 @@
   "demo_public_text": "los datos aquí son visibles para todos y se reinician automáticamente. No introduzcas información privada.",
   "demo_view_source": "Ver código fuente",
   "powered_by": "Con la tecnología de",
-
   "duration_min": "%d min",
   "duration_hour_one": "1 hora",
   "duration_hours": "%d horas",
@@ -65,7 +63,6 @@
   "location_phone": "Llamada telefónica",
   "location_in_person": "En persona",
   "location_video_call": "Videollamada",
-
   "manage_booking_title": "Gestionar reserva",
   "link_expired_title": "Enlace caducado o no válido",
   "link_expired_text": "Este enlace de gestión ha caducado o ya no es válido. Consulta tu correo de confirmación para obtener un enlace válido, o contacta con el anfitrión para solicitar uno nuevo.",
@@ -95,7 +92,6 @@
   "reschedule_failed_error": "No se pudo reprogramar. Inténtalo de nuevo.",
   "already_cancelled_error": "Esta reserva ya ha sido cancelada.",
   "cancellation_failed_error": "No se pudo cancelar la reserva. Inténtalo de nuevo.",
-
   "dow_short_sun": "dom",
   "dow_short_mon": "lun",
   "dow_short_tue": "mar",
@@ -117,7 +113,6 @@
   "month_short_dec": "dic",
   "clock_format": "24h",
   "date_format": "%[1]s %[2]d %[3]s %[4]d",
-
   "email_greeting": "Hola %s,",
   "email_confirmed_lead": "Tu reserva está confirmada.",
   "email_cancelled_lead": "Tu reserva ha sido cancelada.",
@@ -151,13 +146,11 @@
   "email_manage_this_booking": "Gestionar esta reserva:",
   "calendar_event_summary": "%s con %s",
   "calendar_event_booking_id": "ID de la reserva: %s",
-
   "err_booking_limit": "Ya tienes el número máximo de reservas próximas para este evento. Cancela una reserva existente o espera a que pase alguna antes de volver a reservar.",
-  "err_email_throttled": "Demasiadas reservas desde esta dirección de correo recientemente. Inténtalo de nuevo más tarde.",
+  "err_email_throttled": "Demasiadas reservas con estos datos de contacto. Inténtalo más tarde.",
   "err_required_field": "falta el campo obligatorio %q",
   "err_required_checkbox": "Debes marcar %q",
   "err_invalid_option": "opción no válida para %[1]q: %[2]q no es una opción permitida",
-
   "assistant_unavailable": "El asistente de reservas no está disponible en este momento. Elige un horario en el calendario de abajo.",
   "assistant_trouble": "Lo sentimos, estamos teniendo problemas. Elige un horario en el calendario de abajo.",
   "assistant_iteration_cap": "Vamos a simplificarlo: elige un horario en el calendario de abajo.",
@@ -170,10 +163,19 @@
   "time_evening": "Noche",
   "phone_call_number": "Teléfono (opcional, para una llamada)",
   "calendar_degraded_notice": "No se pudo cargar parte de la información del calendario, por lo que la disponibilidad puede estar incompleta.",
-
   "directory_book": "Reservar",
   "directory_empty": "No hay nada reservable por ahora.",
   "directory_members": "Miembros del equipo",
   "directory_person_subtitle": "Reserva tiempo con %s",
-  "directory_team_subtitle": "Reserva tiempo con el equipo %s"
+  "directory_team_subtitle": "Reserva tiempo con el equipo %s",
+  "contact_method_label": "Contacto principal",
+  "contact_phone_label": "Número de teléfono",
+  "contact_phone_hint": "Formato internacional, p. ej. +77011234567. El correo opcional recibe invitaciones. No se envían SMS.",
+  "contact_phone_option": "Teléfono",
+  "contact_email_option": "Correo electrónico",
+  "contact_saved_notice": "Guarda tu enlace privado para ver los detalles, cambiar o cancelar la reserva. No se envían SMS.",
+  "contact_manage_link": "Ver y gestionar reserva",
+  "contact_paid_notice": "El pago puede solicitar un correo de facturación.",
+  "contact_copy_link": "Copiar enlace privado",
+  "contact_invalid_error": "Introduce tu nombre y un teléfono internacional válido (p. ej. +77011234567) o correo electrónico."
 }

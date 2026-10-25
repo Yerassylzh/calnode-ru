@@ -147,7 +147,7 @@
   "calendar_event_summary": "%s med %s",
   "calendar_event_booking_id": "Bokningsreferens: %s",
   "err_booking_limit": "Du har redan nått det högsta antalet kommande bokningar för det här evenemanget. Avboka en befintlig bokning eller vänta tills den har passerat innan du gör en ny.",
-  "err_email_throttled": "För många bokningar från den här e-postadressen på kort tid. Försök igen senare.",
+  "err_email_throttled": "För många bokningar med dessa kontaktuppgifter. Försök igen senare.",
   "err_required_field": "obligatoriskt fält %q saknas",
   "err_required_checkbox": "%q måste vara ikryssat",
   "err_invalid_option": "ogiltigt alternativ för %[1]q: %[2]q är inte ett tillåtet val",
@@ -163,10 +163,19 @@
   "time_evening": "Kväll",
   "phone_call_number": "Telefonnummer (valfritt, för ett telefonsamtal)",
   "calendar_degraded_notice": "Viss kalenderinformation kunde inte läsas in, så tillgängligheten kan vara ofullständig.",
-
   "directory_book": "Boka",
   "directory_empty": "Inget att boka just nu.",
   "directory_members": "Teammedlemmar",
   "directory_person_subtitle": "Boka tid med %s",
-  "directory_team_subtitle": "Boka tid med %s-teamet"
+  "directory_team_subtitle": "Boka tid med %s-teamet",
+  "contact_method_label": "Primär kontakt",
+  "contact_phone_label": "Telefonnummer",
+  "contact_phone_hint": "Internationellt format, t.ex. +77011234567. Valfri e-post får inbjudningar. Inga SMS skickas.",
+  "contact_phone_option": "Telefonnummer",
+  "contact_email_option": "E-post",
+  "contact_saved_notice": "Spara din privata länk för att se detaljer, boka om eller avboka. Inga SMS skickas.",
+  "contact_manage_link": "Visa och hantera bokning",
+  "contact_paid_notice": "Betalningen kan kräva en e-postadress för fakturering.",
+  "contact_copy_link": "Kopiera privat länk",
+  "contact_invalid_error": "Ange ditt namn och ett giltigt internationellt telefonnummer (t.ex. +77011234567) eller e-postadress."
 }

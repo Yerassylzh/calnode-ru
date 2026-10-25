@@ -50,6 +50,8 @@ const (
 	FieldHostEmail       = "host_email"
 	FieldAttendeeName    = "attendee_name"
 	FieldAttendeeEmail   = "attendee_email"
+	FieldAttendeePhone   = "attendee_phone"
+	FieldContactMethod   = "contact_method"
 	FieldAttendeeTZ      = "attendee_timezone"
 	FieldAnswers         = "answers"
 	FieldPaymentStatus   = "payment_status"
@@ -65,7 +67,7 @@ var AllFields = []string{
 	FieldLocation, FieldCancelReason, FieldPreviousStartAt, FieldPreviousEndAt,
 	FieldEventTypeSlug, FieldEventTypeName,
 	FieldHostID, FieldHostName, FieldHostEmail,
-	FieldAttendeeName, FieldAttendeeEmail, FieldAttendeeTZ, FieldAnswers,
+	FieldAttendeeName, FieldAttendeeEmail, FieldAttendeePhone, FieldContactMethod, FieldAttendeeTZ, FieldAnswers,
 	FieldPaymentStatus, FieldAmountPaid, FieldCurrency, FieldRSVPStatus,
 }
 
@@ -281,6 +283,7 @@ type enrichedBooking struct {
 	eventTypeName                           string
 	hostName, hostEmail                     string
 	attendeeName, attendeeEmail, attendeeTZ string
+	attendeePhone, contactMethod            string
 	answers                                 []map[string]string
 }
 
@@ -301,9 +304,9 @@ func (s *Service) enrich(ctx context.Context, p BookingPayload) enrichedBooking 
 		WHERE b.id = ?`, p.ID).Scan(&bd.eventTypeName, &bd.hostName, &bd.hostEmail)
 
 	_ = s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(name,''), COALESCE(email,''), COALESCE(iana_timezone,'')
+		SELECT COALESCE(name,''), COALESCE(email,''), COALESCE(iana_timezone,''), phone, contact_method
 		FROM booking_attendees WHERE booking_id = ? AND is_organizer = 1`, p.ID).
-		Scan(&bd.attendeeName, &bd.attendeeEmail, &bd.attendeeTZ)
+		Scan(&bd.attendeeName, &bd.attendeeEmail, &bd.attendeeTZ, &bd.attendeePhone, &bd.contactMethod)
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT q.label, ba.value
@@ -340,6 +343,8 @@ func buildData(bd enrichedBooking, fields []string) map[string]any {
 		FieldHostEmail:     bd.hostEmail,
 		FieldAttendeeName:  bd.attendeeName,
 		FieldAttendeeEmail: bd.attendeeEmail,
+		FieldAttendeePhone: bd.attendeePhone,
+		FieldContactMethod: bd.contactMethod,
 		FieldAttendeeTZ:    bd.attendeeTZ,
 		FieldAnswers:       bd.answers,
 	}

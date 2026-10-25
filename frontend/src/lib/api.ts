@@ -22,6 +22,8 @@ export type User = {
 };
 
 export type EventType = {
+	booking_contact_policy: 'email_or_phone' | 'phone_only' | 'email_only';
+	default_contact_method: 'phone' | 'email';
 	/** Lower first on public person/team pages; ties sort by name, then slug. */
 	display_order: number;
 	allow_phone_call: boolean;
@@ -104,7 +106,7 @@ export type Booking = {
 	start_at: string;
 	end_at: string;
 	status: 'confirmed' | 'cancelled';
-	attendees: { name: string; email: string }[];
+	attendees: { name: string; email: string; phone: string; contact_method: 'phone' | 'email' }[];
 	created_at: string;
 	host_name?: string; // populated only in the admin "All bookings" view
 	location_value?: string;
@@ -292,6 +294,8 @@ export type UpcomingBooking = {
 	event_type_slug: string;
 	attendee_name: string;
 	attendee_email: string;
+	attendee_phone: string;
+	contact_method: 'email' | 'phone';
 };
 
 export type Invite = {

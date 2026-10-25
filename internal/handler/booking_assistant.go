@@ -64,7 +64,7 @@ const assistantBaseRules = `Style: reply in 1–2 short sentences. Offer at most
 
 Booking flow:
 - To find times, ALWAYS call find_available_slots — never invent or calculate availability. Only offer times it returns.
-- Collect the visitor's name and email (and answers to any required intake questions), confirm the time, then call book with an exact slot_start from find_available_slots.
+- Collect the visitor's name and primary contact: prefer an international phone number (contact_phone), or email as an alternative, subject to the event's contact policy (and answers to any required intake questions), confirm the time, then call book with an exact slot_start from find_available_slots.
 - After booking, confirm in one short line.
 - If you can't help, suggest the calendar picker on the page.`
 
@@ -83,10 +83,11 @@ type assistantRequest struct {
 }
 
 type assistantBooking struct {
-	ID      string `json:"id"`
-	StartAt string `json:"start_at"`
-	EndAt   string `json:"end_at"`
-	Status  string `json:"status"`
+	ManageURL string `json:"manage_url,omitempty"`
+	ID        string `json:"id"`
+	StartAt   string `json:"start_at"`
+	EndAt     string `json:"end_at"`
+	Status    string `json:"status"`
 }
 
 type assistantResponse struct {
@@ -97,6 +98,7 @@ type assistantResponse struct {
 
 // BookingAssistant handles POST /v1/event-types/{slug}/assistant (public, rate-limited).
 func (h *Handler) BookingAssistant(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	slug := r.PathValue("slug")
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	var req assistantRequest
@@ -144,7 +146,7 @@ func (h *Handler) BookingAssistant(w http.ResponseWriter, r *http.Request) {
 	var sendSSE func(any)
 	if sse {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Accel-Buffering", "no") // don't let a proxy buffer the stream
 		flusher, _ := w.(http.Flusher)
 		sendSSE = func(obj any) {
@@ -237,7 +239,7 @@ func (h *Handler) assistantFallback(w http.ResponseWriter, sse bool, msg string)
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 	b, _ := json.Marshal(map[string]any{"type": "fallback", "text": msg})
 	fmt.Fprintf(w, "data: %s\n\n", b)
 	if f, ok := w.(http.Flusher); ok {
@@ -303,6 +305,7 @@ Intake questions: %s
 
 %s`, name, duration, locationLabel(locType, "", i18n.Default()), today, tz, replyLang, questions, assistantBaseRules)
 
+	prompt += "\nBooking contact policy: " + et.ContactPolicy + "; default primary method: " + et.DefaultContactMethod + ". Email is not required for a phone-primary booking. Phone must include + and country code. Do not promise SMS. The private manage link is returned to the visitor outside the chat text."
 	// Admin "Additional instructions" — appended, never replacing the rules above.
 	var extra string
 	_ = h.db.QueryRowContext(ctx, `SELECT llm_extra_instructions FROM server_settings WHERE id = 1`).Scan(&extra)
@@ -337,9 +340,11 @@ func (h *Handler) assistantTools() []llm.Tool {
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"slot_start": map[string]any{"type": "string", "description": "exact slot start (RFC3339) from find_available_slots"},
-						"name":       map[string]any{"type": "string"},
-						"email":      map[string]any{"type": "string"},
+						"slot_start":     map[string]any{"type": "string", "description": "exact slot start (RFC3339) from find_available_slots"},
+						"name":           map[string]any{"type": "string"},
+						"email":          map[string]any{"type": "string"},
+						"contact_phone":  map[string]any{"type": "string"},
+						"contact_method": map[string]any{"type": "string", "enum": []string{"phone", "email"}},
 						"answers": map[string]any{
 							"type":        "array",
 							"description": "answers to intake questions",
@@ -352,7 +357,7 @@ func (h *Handler) assistantTools() []llm.Tool {
 							},
 						},
 					},
-					"required": []string{"slot_start", "name", "email"},
+					"required": []string{"slot_start", "name"},
 				},
 			},
 		},
@@ -394,10 +399,12 @@ func (h *Handler) runAssistantTool(ctx context.Context, slug, tz, lang, name, ar
 
 	case "book":
 		var args struct {
-			SlotStart string `json:"slot_start"`
-			Name      string `json:"name"`
-			Email     string `json:"email"`
-			Answers   []struct {
+			SlotStart     string `json:"slot_start"`
+			Name          string `json:"name"`
+			Email         string `json:"email"`
+			ContactPhone  string `json:"contact_phone"`
+			ContactMethod string `json:"contact_method"`
+			Answers       []struct {
 				QuestionID string `json:"question_id"`
 				Value      string `json:"value"`
 			} `json:"answers"`
@@ -405,8 +412,8 @@ func (h *Handler) runAssistantTool(ctx context.Context, slug, tz, lang, name, ar
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 			return "error: invalid arguments", nil
 		}
-		if args.SlotStart == "" || args.Name == "" || args.Email == "" {
-			return "error: slot_start, name, and email are required to book", nil
+		if args.SlotStart == "" || args.Name == "" {
+			return "error: slot_start and name are required to book; supply contact_phone or email", nil
 		}
 		startAt, err := time.Parse(time.RFC3339, args.SlotStart)
 		if err != nil {
@@ -417,12 +424,12 @@ func (h *Handler) runAssistantTool(ctx context.Context, slug, tz, lang, name, ar
 			raw[i] = booking.Answer{QuestionID: a.QuestionID, Value: a.Value}
 		}
 		b, err := h.createBookingForSlug(ctx, slug, startAt,
-			booking.Attendee{Name: args.Name, Email: args.Email, IANATimezone: tz, Locale: lang}, raw)
+			booking.Attendee{Name: args.Name, Email: args.Email, Phone: args.ContactPhone, ContactMethod: args.ContactMethod, IANATimezone: tz, Locale: lang}, raw)
 		if err != nil {
 			return "error: " + assistantBookError(err), nil
 		}
 		return fmt.Sprintf("booked successfully: id=%s start=%s", b.ID, b.StartAt.UTC().Format(time.RFC3339)),
-			&assistantBooking{ID: b.ID, StartAt: b.StartAt.UTC().Format(time.RFC3339), EndAt: b.EndAt.UTC().Format(time.RFC3339), Status: b.Status}
+			&assistantBooking{ManageURL: h.createdBookingJSON(b).ManageURL, ID: b.ID, StartAt: b.StartAt.UTC().Format(time.RFC3339), EndAt: b.EndAt.UTC().Format(time.RFC3339), Status: b.Status}
 
 	default:
 		return "error: unknown tool", nil
@@ -433,6 +440,8 @@ func (h *Handler) runAssistantTool(ctx context.Context, slug, tz, lang, name, ar
 // the model can relay.
 func assistantBookError(err error) string {
 	switch {
+	case errors.Is(err, booking.ErrInvalidContact):
+		return err.Error()
 	case errors.Is(err, errCalendarUnavailable):
 		return errCalendarUnavailable.Error()
 	case errors.Is(err, errEventTypeNotFound):
@@ -442,7 +451,7 @@ func assistantBookError(err error) string {
 	case errors.Is(err, booking.ErrBookingLimitReached):
 		return "you already have the maximum number of upcoming bookings for this event"
 	case errors.Is(err, booking.ErrEmailThrottled):
-		return "too many booking attempts from this email address — please try again later"
+		return "too many booking attempts from these contact details — please try again later"
 	case errors.Is(err, errInvalidBookerEmail):
 		// Worth its own case: the model can fix this by asking again, which the generic
 		// fallback below does not tell it.

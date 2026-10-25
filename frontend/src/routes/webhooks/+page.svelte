@@ -60,6 +60,8 @@
 		{ group: 'Attendee', pii: true, fields: [
 			{ key: 'attendee_name', labelKey: 'webhooks.fields.attendeeName', pii: true },
 			{ key: 'attendee_email', labelKey: 'webhooks.fields.attendeeEmail', pii: true },
+			{ key: 'attendee_phone', labelKey: 'webhooks.fields.attendeePhone', pii: true },
+			{ key: 'contact_method', labelKey: 'webhooks.fields.contactMethod', pii: true },
 			{ key: 'attendee_timezone', labelKey: 'webhooks.fields.attendeeTimezone', pii: true },
 		] },
 		{ group: 'Intake', pii: true, fields: [
@@ -77,9 +79,10 @@
 		Intake: 'webhooks.groups.intake'
 	};
 	const allFieldKeys = fieldGroups.flatMap((g) => g.fields.map((f) => f.key));
+	const defaultFieldKeys = allFieldKeys.filter((k) => k !== 'attendee_phone' && k !== 'contact_method');
 
 	let form = $state<{ url: string; events: string[]; fields: string[] }>({
-		url: '', events: ['booking.created', 'booking.cancelled'], fields: [...allFieldKeys]
+		url: '', events: ['booking.created', 'booking.cancelled'], fields: [...defaultFieldKeys]
 	});
 
 	// Delivery log (lazy-loaded per webhook).
@@ -112,7 +115,7 @@
 		creating = true;
 		try {
 			await api.post('/v1/webhooks', { url: form.url, events: form.events, fields: form.fields });
-			form = { url: '', events: ['booking.created', 'booking.cancelled'], fields: [...allFieldKeys] };
+			form = { url: '', events: ['booking.created', 'booking.cancelled'], fields: [...defaultFieldKeys] };
 			showCreate = false;
 			await load();
 		} catch (e: any) {

@@ -60,8 +60,14 @@ func TestDirectoryPages_headHTMLAndCSP(t *testing.T) {
 			manageReq.SetPathValue("token", "invalid")
 			h.ManagePage(manageRec, manageReq)
 			wantCSP := bookRec.Header().Get("Content-Security-Policy")
-			if bookRec.Code != http.StatusOK || manageRec.Code != http.StatusOK || wantCSP == "" || manageRec.Header().Get("Content-Security-Policy") != wantCSP {
-				t.Fatal("booking/manage CSP baseline missing or inconsistent")
+			if bookRec.Code != http.StatusOK || manageRec.Code != http.StatusOK || wantCSP == "" || manageRec.Header().Get("Content-Security-Policy") != strictCSP {
+				t.Fatal("booking CSP missing or token-bearing manage page is not strict")
+			}
+			if strings.Contains(manageRec.Body.String(), "directory-custom-css") || strings.Contains(manageRec.Body.String(), "GTM-TEST123") || strings.Contains(manageRec.Body.String(), "G-TEST123") {
+				t.Fatal("manage capability page must exclude third-party tracking")
+			}
+			if manageRec.Header().Get("Cache-Control") != "no-store" || manageRec.Header().Get("Referrer-Policy") != "no-referrer" {
+				t.Fatal("manage page must protect bearer capability")
 			}
 			if tc.strict && wantCSP != strictCSP {
 				t.Fatalf("empty settings must preserve strict CSP: %q", wantCSP)
