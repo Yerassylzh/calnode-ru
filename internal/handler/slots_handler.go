@@ -429,6 +429,8 @@ func (h *Handler) loadHostSchedule(ctx context.Context, userID, eventTypeID stri
 		return nil, nil, nil, err
 	}
 
+	rules, overrides, _ = h.applyBreaksToSchedule(ctx, userID, rules, overrides)
+
 	return hostLoc, rules, overrides, nil
 }
 

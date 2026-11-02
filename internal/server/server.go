@@ -419,6 +419,11 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 	mux.HandleFunc("DELETE /v1/availability-overrides/{id}", h.RequireAuth(h.DeleteAvailabilityOverride))
 	mux.HandleFunc("DELETE /v1/availability-overrides/group/{groupId}", h.RequireAuth(h.DeleteAvailabilityOverrideGroup))
 
+	// Doctor breaks
+	mux.HandleFunc("POST /v1/doctor-breaks", h.RequireAuth(h.CreateDoctorBreak))
+	mux.HandleFunc("GET /v1/doctor-breaks", h.RequireAuth(h.ListDoctorBreaks))
+	mux.HandleFunc("DELETE /v1/doctor-breaks/{id}", h.RequireAuth(h.DeleteDoctorBreak))
+
 	// Slots — public, rate-limited per IP. Browsed more than booked (so a higher cap
 	// than booking), but each call fans out Google free/busy per host, so leaving it
 	// cors wraps the public booking endpoints so the embeddable widget can call them

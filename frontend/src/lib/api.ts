@@ -324,6 +324,18 @@ export type AvailabilityOverride = {
 	group_id?: string;
 };
 
+export type DoctorBreak = {
+	id: string;
+	user_id: string;
+	kind: 'weekly' | 'date';
+	day_of_week?: number;
+	date?: string;
+	start_time: string;
+	end_time: string;
+	title: string;
+	created_at?: string;
+};
+
 async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
 	const res = await fetch(path, {
 		credentials: 'same-origin',

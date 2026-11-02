@@ -23,6 +23,7 @@ func (h *Handler) CreateAvailabilityRule(w http.ResponseWriter, r *http.Request)
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 
 	var req struct {
+		UserID      *string `json:"user_id"`
 		EventTypeID *string `json:"event_type_id"`
 		DayOfWeek   int     `json:"day_of_week"`
 		StartTime   string  `json:"start_time"`
@@ -41,11 +42,16 @@ func (h *Handler) CreateAvailabilityRule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	targetUID := user.ID
+	if req.UserID != nil && *req.UserID != "" && (user.IsAdmin || *req.UserID == user.ID) {
+		targetUID = *req.UserID
+	}
+
 	id := uid.New()
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO availability_rules (id, user_id, event_type_id, day_of_week, start_time, end_time)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		id, user.ID, req.EventTypeID, req.DayOfWeek, req.StartTime, req.EndTime)
+		id, targetUID, req.EventTypeID, req.DayOfWeek, req.StartTime, req.EndTime)
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			h.writeError(w, http.StatusConflict, "a rule for this day and time already exists")
@@ -66,9 +72,14 @@ func (h *Handler) CreateAvailabilityRule(w http.ResponseWriter, r *http.Request)
 }
 
 // ListAvailabilityRules handles GET /v1/availability-rules.
-// Optional query param: ?event_type_id=<id> to filter; omit for global rules.
+// Optional query params: ?event_type_id=<id> to filter; ?user_id=<id> for admins.
 func (h *Handler) ListAvailabilityRules(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromContext(r.Context())
+
+	targetUID := user.ID
+	if qUID := r.URL.Query().Get("user_id"); qUID != "" && (user.IsAdmin || qUID == user.ID) {
+		targetUID = qUID
+	}
 
 	var (
 		rows *sql.Rows
@@ -79,13 +90,13 @@ func (h *Handler) ListAvailabilityRules(w http.ResponseWriter, r *http.Request) 
 			SELECT id, event_type_id, day_of_week, start_time, end_time
 			FROM availability_rules
 			WHERE user_id = ? AND event_type_id = ?
-			ORDER BY day_of_week, start_time`, user.ID, etID)
+			ORDER BY day_of_week, start_time`, targetUID, etID)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `
 			SELECT id, event_type_id, day_of_week, start_time, end_time
 			FROM availability_rules
 			WHERE user_id = ?
-			ORDER BY day_of_week, start_time`, user.ID)
+			ORDER BY day_of_week, start_time`, targetUID)
 	}
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "list availability rules", "error", err)
@@ -138,10 +149,19 @@ func (h *Handler) UpdateAvailabilityRule(w http.ResponseWriter, r *http.Request)
 
 	var current availRuleJSON
 	var etID sql.NullString
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, event_type_id, day_of_week, start_time, end_time
-		 FROM availability_rules WHERE id = ? AND user_id = ?`, id, user.ID).
-		Scan(&current.ID, &etID, &current.DayOfWeek, &current.StartTime, &current.EndTime)
+	var ruleUserID string
+	var err error
+	if user.IsAdmin {
+		err = h.db.QueryRowContext(r.Context(),
+			`SELECT id, user_id, event_type_id, day_of_week, start_time, end_time
+			 FROM availability_rules WHERE id = ?`, id).
+			Scan(&current.ID, &ruleUserID, &etID, &current.DayOfWeek, &current.StartTime, &current.EndTime)
+	} else {
+		err = h.db.QueryRowContext(r.Context(),
+			`SELECT id, user_id, event_type_id, day_of_week, start_time, end_time
+			 FROM availability_rules WHERE id = ? AND user_id = ?`, id, user.ID).
+			Scan(&current.ID, &ruleUserID, &etID, &current.DayOfWeek, &current.StartTime, &current.EndTime)
+	}
 	if err == sql.ErrNoRows {
 		h.writeError(w, http.StatusNotFound, "rule not found")
 		return
@@ -174,8 +194,8 @@ func (h *Handler) UpdateAvailabilityRule(w http.ResponseWriter, r *http.Request)
 	}
 
 	_, err = h.db.ExecContext(r.Context(),
-		`UPDATE availability_rules SET day_of_week=?, start_time=?, end_time=? WHERE id=? AND user_id=?`,
-		current.DayOfWeek, current.StartTime, current.EndTime, id, user.ID)
+		`UPDATE availability_rules SET day_of_week=?, start_time=?, end_time=? WHERE id=?`,
+		current.DayOfWeek, current.StartTime, current.EndTime, id)
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			h.writeError(w, http.StatusConflict, "a rule for this day and time already exists")
@@ -193,8 +213,13 @@ func (h *Handler) DeleteAvailabilityRule(w http.ResponseWriter, r *http.Request)
 	user, _ := userFromContext(r.Context())
 	id := r.PathValue("id")
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM availability_rules WHERE id = ? AND user_id = ?`, id, user.ID)
+	var res sql.Result
+	var err error
+	if user.IsAdmin {
+		res, err = h.db.ExecContext(r.Context(), `DELETE FROM availability_rules WHERE id = ?`, id)
+	} else {
+		res, err = h.db.ExecContext(r.Context(), `DELETE FROM availability_rules WHERE id = ? AND user_id = ?`, id, user.ID)
+	}
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "delete availability rule", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")

@@ -8,6 +8,7 @@ import * as eventTypeDetail from './eventTypeDetail';
 import * as questionsPanel from './questionsPanel';
 import * as embedPanel from './embedPanel';
 import * as availability from './availability';
+import * as doctorBreaks from './doctorBreaks';
 import * as members from './members';
 import * as teams from './teams';
 import * as recordings from './recordings';
@@ -28,6 +29,6 @@ import * as settingsAI from './settingsAI';
 import * as settingsTracking from './settingsTracking';
 import * as shared from './shared';
 
-export const en = Object.assign({}, core.en, home.en, auth.en, bookings.en, calendar.en, eventTypes.en, eventTypeDetail.en, questionsPanel.en, embedPanel.en, availability.en, members.en, teams.en, recordings.en, apiKeys.en, connections.en, webhooks.en, settingsLayout.en, settingsProfile.en, settingsBranding.en, settingsEmail.en, settingsGoogle.en, settingsVideo.en, settingsZoom.en, settingsStorage.en, settingsPayments.en, settingsNotifications.en, settingsAI.en, settingsTracking.en, shared.en);
+export const en = Object.assign({}, core.en, home.en, auth.en, bookings.en, calendar.en, eventTypes.en, eventTypeDetail.en, questionsPanel.en, embedPanel.en, availability.en, doctorBreaks.en, members.en, teams.en, recordings.en, apiKeys.en, connections.en, webhooks.en, settingsLayout.en, settingsProfile.en, settingsBranding.en, settingsEmail.en, settingsGoogle.en, settingsVideo.en, settingsZoom.en, settingsStorage.en, settingsPayments.en, settingsNotifications.en, settingsAI.en, settingsTracking.en, shared.en);
 
-export const ru = Object.assign({}, core.ru, home.ru, auth.ru, bookings.ru, calendar.ru, eventTypes.ru, eventTypeDetail.ru, questionsPanel.ru, embedPanel.ru, availability.ru, members.ru, teams.ru, recordings.ru, apiKeys.ru, connections.ru, webhooks.ru, settingsLayout.ru, settingsProfile.ru, settingsBranding.ru, settingsEmail.ru, settingsGoogle.ru, settingsVideo.ru, settingsZoom.ru, settingsStorage.ru, settingsPayments.ru, settingsNotifications.ru, settingsAI.ru, settingsTracking.ru, shared.ru);
+export const ru = Object.assign({}, core.ru, home.ru, auth.ru, bookings.ru, calendar.ru, eventTypes.ru, eventTypeDetail.ru, questionsPanel.ru, embedPanel.ru, availability.ru, doctorBreaks.ru, members.ru, teams.ru, recordings.ru, apiKeys.ru, connections.ru, webhooks.ru, settingsLayout.ru, settingsProfile.ru, settingsBranding.ru, settingsEmail.ru, settingsGoogle.ru, settingsVideo.ru, settingsZoom.ru, settingsStorage.ru, settingsPayments.ru, settingsNotifications.ru, settingsAI.ru, settingsTracking.ru, shared.ru);

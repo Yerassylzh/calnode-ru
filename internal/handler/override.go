@@ -38,6 +38,7 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 
 	var req struct {
+		UserID    *string `json:"user_id"`
 		Date      string  `json:"date"`
 		EndDate   *string `json:"end_date"` // set for a multi-day out-of-office span
 		Reason    string  `json:"reason"`
@@ -49,6 +50,10 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
+	}
+	targetUID := user.ID
+	if req.UserID != nil && *req.UserID != "" && (user.IsAdmin || *req.UserID == user.ID) {
+		targetUID = *req.UserID
 	}
 	if req.Date == "" {
 		h.writeError(w, http.StatusBadRequest, "date is required (YYYY-MM-DD)")
@@ -90,7 +95,7 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 		var blockReason string
 		err := h.db.QueryRowContext(r.Context(),
 			`SELECT reason FROM availability_overrides WHERE user_id = ? AND date = ? AND is_available = 0`,
-			user.ID, req.Date).Scan(&blockReason)
+			targetUID, req.Date).Scan(&blockReason)
 		if err != nil && err != sql.ErrNoRows {
 			h.logger.ErrorContext(r.Context(), "override custom: check block", "error", err)
 			h.writeError(w, http.StatusInternalServerError, "internal error")
@@ -142,7 +147,7 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 			ds := d.Format("2006-01-02")
 			if _, err := tx.ExecContext(r.Context(),
 				`DELETE FROM availability_overrides WHERE user_id = ? AND date = ?`,
-				user.ID, ds); err != nil {
+				targetUID, ds); err != nil {
 				h.logger.ErrorContext(r.Context(), "override range: clear date", "error", err)
 				h.writeError(w, http.StatusInternalServerError, "internal error")
 				return
@@ -150,7 +155,7 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 			if _, err := tx.ExecContext(r.Context(), `
 				INSERT INTO availability_overrides (id, user_id, date, is_available, reason, start_time, end_time, group_id)
 				VALUES (?, ?, ?, 0, ?, NULL, NULL, ?)`,
-				uid.New(), user.ID, ds, req.Reason, groupID); err != nil {
+				uid.New(), targetUID, ds, req.Reason, groupID); err != nil {
 				h.logger.ErrorContext(r.Context(), "override range: insert", "error", err)
 				h.writeError(w, http.StatusInternalServerError, "internal error")
 				return
@@ -180,7 +185,7 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 		defer tx.Rollback() //nolint:errcheck
 		if _, err := tx.ExecContext(r.Context(),
 			`DELETE FROM availability_overrides WHERE user_id = ? AND date = ?`,
-			user.ID, req.Date); err != nil {
+			targetUID, req.Date); err != nil {
 			h.logger.ErrorContext(r.Context(), "override block: clear date", "error", err)
 			h.writeError(w, http.StatusInternalServerError, "internal error")
 			return
@@ -189,7 +194,7 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 		if _, err := tx.ExecContext(r.Context(), `
 			INSERT INTO availability_overrides (id, user_id, date, is_available, reason, start_time, end_time)
 			VALUES (?, ?, ?, 0, ?, NULL, NULL)`,
-			id, user.ID, req.Date, req.Reason); err != nil {
+			id, targetUID, req.Date, req.Reason); err != nil {
 			h.logger.ErrorContext(r.Context(), "override block: insert", "error", err)
 			h.writeError(w, http.StatusInternalServerError, "internal error")
 			return
@@ -211,7 +216,7 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO availability_overrides (id, user_id, date, is_available, reason, start_time, end_time)
 		VALUES (?, ?, ?, 1, 'custom_hours', ?, ?)`,
-		id, user.ID, req.Date, req.StartTime, req.EndTime); err != nil {
+		id, targetUID, req.Date, req.StartTime, req.EndTime); err != nil {
 		if db.IsUniqueViolation(err) {
 			h.writeError(w, http.StatusConflict, "those exact hours already exist for this date")
 			return
@@ -231,12 +236,17 @@ func (h *Handler) CreateAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 func (h *Handler) ListAvailabilityOverrides(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromContext(r.Context())
 
+	targetUID := user.ID
+	if qUID := r.URL.Query().Get("user_id"); qUID != "" && (user.IsAdmin || qUID == user.ID) {
+		targetUID = qUID
+	}
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, date, is_available, COALESCE(reason,'day_off'),
 		       COALESCE(start_time,''), COALESCE(end_time,''), group_id
 		FROM availability_overrides
 		WHERE user_id = ?
-		ORDER BY date`, user.ID)
+		ORDER BY date`, targetUID)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "list availability overrides", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")
@@ -392,8 +402,13 @@ func (h *Handler) DeleteAvailabilityOverride(w http.ResponseWriter, r *http.Requ
 	user, _ := userFromContext(r.Context())
 	id := r.PathValue("id")
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM availability_overrides WHERE id = ? AND user_id = ?`, id, user.ID)
+	var res sql.Result
+	var err error
+	if user.IsAdmin {
+		res, err = h.db.ExecContext(r.Context(), `DELETE FROM availability_overrides WHERE id = ?`, id)
+	} else {
+		res, err = h.db.ExecContext(r.Context(), `DELETE FROM availability_overrides WHERE id = ? AND user_id = ?`, id, user.ID)
+	}
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "delete availability override", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")
@@ -413,8 +428,13 @@ func (h *Handler) DeleteAvailabilityOverrideGroup(w http.ResponseWriter, r *http
 	user, _ := userFromContext(r.Context())
 	groupID := r.PathValue("groupId")
 
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM availability_overrides WHERE group_id = ? AND user_id = ?`, groupID, user.ID)
+	var res sql.Result
+	var err error
+	if user.IsAdmin {
+		res, err = h.db.ExecContext(r.Context(), `DELETE FROM availability_overrides WHERE group_id = ?`, groupID)
+	} else {
+		res, err = h.db.ExecContext(r.Context(), `DELETE FROM availability_overrides WHERE group_id = ? AND user_id = ?`, groupID, user.ID)
+	}
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "delete availability override group", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")

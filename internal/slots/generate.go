@@ -248,9 +248,17 @@ func hostsByStart(req Request, p params, applyBusy bool, belowNotice map[time.Ti
 			}
 
 			for _, f := range avail {
-				// Align the first slot start up to the nearest interval boundary
-				// (epoch-aligned so slots land on :00/:15/:30/:45 etc.).
-				t := alignUp(f.Start, p.interval)
+				// Align slot starts relative to the host's configured working window start,
+				// so shifts starting at e.g. 09:30 offer their first slot right at 09:30
+				// regardless of whether the slot interval divides an hour evenly.
+				base := f.Start
+				for _, w := range windows {
+					if !f.Start.Before(w.Start) && !f.End.After(w.End) {
+						base = w.Start
+						break
+					}
+				}
+				t := alignUpFrom(f.Start, base, p.interval)
 				for ; !t.Add(p.dur).After(f.End); t = t.Add(p.interval) {
 					if t.Before(p.minNotice) {
 						// !t.Before(req.Now) is what keeps the attribution honest: a start
@@ -379,6 +387,21 @@ func pickHosts(hosts []HostAvailability, available map[string]bool, mode string)
 		}
 		return nil
 	}
+}
+
+// alignUpFrom rounds t up to the next interval boundary relative to base.
+// If t is at or before base, base is returned.
+// When t is past base, t is aligned to base + k*interval.
+func alignUpFrom(t, base time.Time, interval time.Duration) time.Time {
+	if interval <= 0 || !t.After(base) {
+		return base
+	}
+	diff := t.Sub(base)
+	rem := diff % interval
+	if rem == 0 {
+		return t
+	}
+	return t.Add(interval - rem)
 }
 
 // alignUp rounds t up to the next epoch-aligned multiple of interval.

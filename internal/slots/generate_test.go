@@ -93,6 +93,42 @@ func TestGenerate_basicMonday(t *testing.T) {
 	assertSlotStarts(t, got, wantStarts)
 }
 
+func TestGenerate_40MinuteSlotStartsAtScheduleStart(t *testing.T) {
+	// Schedule: Mon 09:30 - 12:00, 40-min duration, 40-min interval.
+	// Slot must start exactly at 09:30 (09:30-10:10), NOT rounded to 09:40-10:20.
+	loc := time.UTC
+	now := utcTime(2026, 6, 14, 0, 0, 0)
+
+	req := slots.Request{
+		Event: slots.EventConfig{
+			DurationMinutes:     40,
+			SlotIntervalMinutes: 40,
+			RoutingMode:         "fixed",
+			MaxFutureDays:       30,
+		},
+		Hosts:    []slots.HostAvailability{singleHost("h1", loc, monRules("09:30", "12:00"))},
+		DateFrom: utcDate(2026, 6, 15),
+		DateTo:   utcDate(2026, 6, 15),
+		BookerTZ: loc,
+		Now:      now,
+	}
+
+	got, err := slots.Generate(req)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	wantStarts := []time.Time{
+		utcTime(2026, 6, 15, 9, 30, 0),
+		utcTime(2026, 6, 15, 10, 10, 0),
+		utcTime(2026, 6, 15, 10, 50, 0),
+	}
+	assertSlotStarts(t, got, wantStarts)
+	if len(got) > 0 && !got[0].End.Equal(utcTime(2026, 6, 15, 10, 10, 0)) {
+		t.Errorf("got end %v, want 10:10:00", got[0].End)
+	}
+}
+
 func TestGenerate_noSlotsOnWrongDay(t *testing.T) {
 	// Rules only for Monday; date is Tuesday.
 	loc := time.UTC
