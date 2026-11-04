@@ -18,8 +18,8 @@ type doctorBreakJSON struct {
 	Kind      string  `json:"kind"` // "weekly" | "date"
 	DayOfWeek *int    `json:"day_of_week,omitempty"`
 	Date      *string `json:"date,omitempty"` // YYYY-MM-DD
-	StartTime string  `json:"start_time"`    // HH:MM
-	EndTime   string  `json:"end_time"`      // HH:MM
+	StartTime string  `json:"start_time"`     // HH:MM
+	EndTime   string  `json:"end_time"`       // HH:MM
 	Title     string  `json:"title"`
 	CreatedAt string  `json:"created_at"`
 }
@@ -94,8 +94,7 @@ func (h *Handler) CreateDoctorBreak(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	var req struct {
 		UserID    *string `json:"user_id"`
-		Kind      string  `json:"kind"` // "weekly" | "date"
-		DayOfWeek *int    `json:"day_of_week"`
+		Kind      string  `json:"kind"`
 		Date      *string `json:"date"`
 		StartTime string  `json:"start_time"`
 		EndTime   string  `json:"end_time"`
@@ -116,25 +115,18 @@ func (h *Handler) CreateDoctorBreak(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.Kind != "weekly" && req.Kind != "date" {
-		h.writeError(w, http.StatusBadRequest, "kind must be 'weekly' or 'date'")
+	if req.Kind != "date" {
+		h.writeError(w, http.StatusBadRequest, "only one-time breaks can be created (kind must be 'date')")
 		return
 	}
 
-	if req.Kind == "weekly" {
-		if req.DayOfWeek == nil || *req.DayOfWeek < 0 || *req.DayOfWeek > 6 {
-			h.writeError(w, http.StatusBadRequest, "day_of_week must be 0 (Sun) through 6 (Sat) for weekly breaks")
-			return
-		}
-	} else {
-		if req.Date == nil || *req.Date == "" {
-			h.writeError(w, http.StatusBadRequest, "date is required for date-specific breaks")
-			return
-		}
-		if _, err := time.Parse("2006-01-02", *req.Date); err != nil {
-			h.writeError(w, http.StatusBadRequest, "date must be in YYYY-MM-DD format")
-			return
-		}
+	if req.Date == nil || *req.Date == "" {
+		h.writeError(w, http.StatusBadRequest, "date is required for one-time breaks")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", *req.Date); err != nil {
+		h.writeError(w, http.StatusBadRequest, "date must be in YYYY-MM-DD format")
+		return
 	}
 
 	req.StartTime = strings.TrimSpace(req.StartTime)
@@ -156,19 +148,10 @@ func (h *Handler) CreateDoctorBreak(w http.ResponseWriter, r *http.Request) {
 	id := uid.New()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	var dowVal any = nil
-	if req.Kind == "weekly" {
-		dowVal = *req.DayOfWeek
-	}
-	var dateVal any = nil
-	if req.Kind == "date" {
-		dateVal = *req.Date
-	}
-
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO doctor_breaks (id, user_id, kind, day_of_week, date, start_time, end_time, title, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, targetUID, req.Kind, dowVal, dateVal, req.StartTime, req.EndTime, title, now)
+		VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+		id, targetUID, req.Kind, *req.Date, req.StartTime, req.EndTime, title, now)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "create doctor break", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")
@@ -179,7 +162,6 @@ func (h *Handler) CreateDoctorBreak(w http.ResponseWriter, r *http.Request) {
 		ID:        id,
 		UserID:    targetUID,
 		Kind:      req.Kind,
-		DayOfWeek: req.DayOfWeek,
 		Date:      req.Date,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,

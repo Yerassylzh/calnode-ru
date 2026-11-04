@@ -18,6 +18,7 @@
 
 	let checking = $state(true);
 	let reportOpen = $state(false);
+	let breaksMenuOpen = $state(false);
 	let recordingsConfigured = $state(false);
 	let version = $state('');
 
@@ -26,6 +27,7 @@
 	const RELEASES_URL = 'https://github.com/Calnode/calnode/releases';
 
 	const isLogin = $derived($page.route.id === '/login');
+	const isBreaks = $derived($page.route.id === '/breaks');
 	const isPublicRoute = $derived(
 		$page.route.id === '/login' ||
 		$page.route.id === '/claim' ||
@@ -226,9 +228,20 @@
 	{#if $authStatus.demo_mode}
 		<DemoBanner />
 	{/if}
-	<div class="flex flex-1 overflow-hidden">
+	{#if isBreaks}
+		<div class="border-b bg-sidebar p-2 sm:hidden">
+			<button type="button" class={buttonVariants({ variant: 'outline' })}
+				aria-controls="admin-sidebar" aria-expanded={breaksMenuOpen}
+				onclick={() => (breaksMenuOpen = !breaksMenuOpen)}>
+				{$t('doctorBreaks.menu')}
+			</button>
+		</div>
+	{/if}
+	<div class="relative flex flex-1 overflow-hidden">
 		<!-- Sidebar -->
-		<aside class="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+		<aside id="admin-sidebar" class="w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar {isBreaks
+			? (breaksMenuOpen ? 'absolute inset-y-0 left-0 z-10 flex overflow-y-auto shadow-lg sm:static sm:shadow-none' : 'hidden sm:flex')
+			: 'flex'}">
 			<!-- User section -->
 			<a href="{base}/settings/profile" class="flex items-center gap-3 border-b border-sidebar-border px-4 py-3 hover:bg-sidebar-accent/60 transition-colors">
 				<!-- Fixed-size clip container: the image fills it and is clipped by the
@@ -263,6 +276,7 @@
 						: $page.url.pathname.startsWith(item.href)}
 					<a
 						href={item.href}
+						onclick={() => (breaksMenuOpen = false)}
 						class="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors
 							{active
 								? 'bg-sidebar-accent text-sidebar-accent-foreground'
@@ -314,7 +328,7 @@
 
 		<!-- Main content -->
 		<main class="flex-1 overflow-y-auto bg-background">
-			<div class="mx-auto max-w-4xl px-8 py-8">
+			<div class={isBreaks ? '' : 'mx-auto max-w-4xl px-8 py-8'}>
 				{@render children()}
 			</div>
 		</main>

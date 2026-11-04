@@ -1,0 +1,556 @@
+{
+  "name": "CalNode — sync today’s amoCRM bookings",
+  "nodes": [
+    {
+      "id": "sub-workflow",
+      "name": "Run as n8n tool",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        -200
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "manual",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "schedule",
+      "name": "Every 10 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "configure",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Set deployment values here. Attach the secret as Header Auth on Fetch KVIK leads.\nconst config = {\n  kvikLeadsUrl: 'https://kvik-backend.usekvik.com/api/workspaces/33a0ad4f-2331-465e-91f0-c762f93028ba/integrations/amocrm/leads',\n  calnodeBaseUrl: 'https://emdeu-calnode.usekvi.com',\n  sourceWorkspaceId: '33a0ad4f-2331-465e-91f0-c762f93028ba',\n  pipelineId: 11450722,\n  statusId: 89675354,\n  appointmentFieldId: 864913,\n  doctorFieldId: 0,\n  serviceFieldId: 0,\n  patientNameFieldId: 0,\n  patientPhoneFieldId: 0,\n  doctorEnums: { rodionova: 0, bekenova: 0, sakhanova: 0 },\n  appointmentWindowDays: 91,\n  procedureOverrides: {}, // Optional exact CalNode dropdown label keyed by service enum ID.\n  dryRun: true,\n};\nconst positiveId = value => Number.isSafeInteger(value) && value > 0;\nfor (const key of ['pipelineId', 'statusId', 'appointmentFieldId', 'doctorFieldId', 'serviceFieldId', 'patientNameFieldId', 'patientPhoneFieldId']) {\n  if (!positiveId(config[key])) throw new Error('Set a positive numeric ' + key + ' in Configuration.');\n}\nconst doctorIds = Object.values(config.doctorEnums);\nif (!doctorIds.every(positiveId) || new Set(doctorIds).size !== doctorIds.length) {\n  throw new Error('Set three distinct doctor enum IDs in Configuration.');\n}\nif (!positiveId(config.appointmentWindowDays) || config.appointmentWindowDays > 365) throw new Error('appointmentWindowDays must be 1–365.');\nconst now = DateTime.now().setZone('Asia/Almaty');\nreturn [{ json: {\n  ...config,\n  timezone: now.zoneName,\n  from: now.toISODate(),\n  to: now.plus({ days: config.appointmentWindowDays - 1 }).toISODate(),\n  dayStart: now.startOf('day').toSeconds(),\n  runStarted: now.toSeconds(),\n} }];"
+      }
+    },
+    {
+      "id": "fetch",
+      "name": "Fetch KVIK leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.kvikLeadsUrl }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pipelineId",
+              "value": "={{ $json.pipelineId }}"
+            },
+            {
+              "name": "statusId",
+              "value": "={{ $json.statusId }}"
+            },
+            {
+              "name": "dateFieldId",
+              "value": "={{ $json.appointmentFieldId }}"
+            },
+            {
+              "name": "from",
+              "value": "={{ $json.from }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $json.to }}"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount === 0 ? 1 : $response.body.data.nextPage }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || !Array.isArray($response.body?.data?.items) || !($response.body.data.nextPage != null && Number($response.body.data.nextPage) > Number($response.body.data.page)) }}",
+              "limitPagesFetched": false,
+              "requestInterval": 100
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "map",
+      "name": "Map CRM bookings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const catalog = {\n  \"549585\": {\n    \"name\": \"Узи плода по акции \\\"Здоровый малыш\\\"\",\n    \"slugs\": [\n      \"rodionova_40_min\"\n    ]\n  },\n  \"549587\": {\n    \"name\": \"Акция УЗИ плода+3D\",\n    \"slugs\": [\n      \"rodionova_60_min\",\n      \"sakhanova_45_min\"\n    ]\n  },\n  \"549589\": {\n    \"name\": \"МУЖСКОЙ ЧЕКАП: УЗИ мочевого пузыря (с остаточной мочой), УЗИ органов мошонки, УЗИ, ТРУЗИ простаты,  УЗИ почек+надпочечники, УЗИ щитовидной железы (+ паращитовидной железы) 5 исследований\",\n    \"slugs\": [\n      \"bekenova_90_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549591\": {\n    \"name\": \"ЖЕНСКИЙ ЧЕКАП: УЗИ органов малого таза, УЗИ молочных желез, УЗИ мочевого пузыря, УЗИ почек+надпочечники, УЗИ щитовидной железы (+паращитовидные железы)  5 исследований\",\n    \"slugs\": [\n      \"bekenova_90_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549593\": {\n    \"name\": \"ГРУДНИЧКОВЫЙ ЧЕКАП (УЗИ тазобедреного сустава, УЗИ вилочковой железы, УЗИ ГКСМ, Нейросонография) 4 исследования\",\n    \"slugs\": [\n      \"rodionova_60_min\"\n    ]\n  },\n  \"549595\": {\n    \"name\": \"Органы малого таза + вены органов малого таза (комплекс)\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549597\": {\n    \"name\": \"УЗИ комплексное: УЗИ ОБП + почек (комплекс)УЗИ комплексное: УЗИ ОБП + почек (комплекс)\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549599\": {\n    \"name\": \"УЗИ, ТРУЗИ простаты + мочевого пузыря (комплекс)\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549601\": {\n    \"name\": \"УЗИ почек+мочевого пузыря (комплекс)\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549603\": {\n    \"name\": \"УЗИ почек + сосудов почек (комплекс)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549605\": {\n    \"name\": \"УЗИ плода + допплер плода (комплекс)\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_60_min\"\n    ]\n  },\n  \"549607\": {\n    \"name\": \"УЗИ плода + узи лонного сочленения (комплекс)\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_45_min\"\n    ]\n  },\n  \"549609\": {\n    \"name\": \"УЗИ плода + цервикометрия (комплекс)\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_45_min\"\n    ]\n  },\n  \"549611\": {\n    \"name\": \"УЗДГ артерий  нижних конечностей + аорты (комплекс)\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_45_min\",\n      \"sakhanova_45_min\"\n    ]\n  },\n  \"549613\": {\n    \"name\": \"УЗДГ артерий+вен нижних конечностей (комплекс)\",\n    \"slugs\": [\n      \"bekenova_60_min\",\n      \"rodionova_60_min\"\n    ]\n  },\n  \"549615\": {\n    \"name\": \"УЗДГ артерий  + вен верхних конечностей (комплекс)\",\n    \"slugs\": [\n      \"bekenova_60_min\",\n      \"rodionova_60_min\"\n    ]\n  },\n  \"549617\": {\n    \"name\": \"Вены органов малого таза\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549619\": {\n    \"name\": \"УЗИ артерии матки\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549621\": {\n    \"name\": \"УЗДГ аорты и ее висцеральные ветви\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549623\": {\n    \"name\": \"УЗДГ вен нижних конечностей\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_40_min\",\n      \"sakhanova_40_min\"\n    ]\n  },\n  \"549625\": {\n    \"name\": \"УЗДГ артерий верхних конечностей\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_40_min\",\n      \"sakhanova_40_min\"\n    ]\n  },\n  \"549627\": {\n    \"name\": \"УЗДГ артерий верхних конечностей с функциональной пробой\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_40_min\",\n      \"sakhanova_40_min\"\n    ]\n  },\n  \"549629\": {\n    \"name\": \"УЗДГ БЦА (экстракраниальных сосудов, сосудов шеи)\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549631\": {\n    \"name\": \"УЗДГ вен верхних конечностей\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_40_min\",\n      \"sakhanova_40_min\"\n    ]\n  },\n  \"549633\": {\n    \"name\": \"УЗДГ сосудов почек\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549635\": {\n    \"name\": \"УЗДГ сосудов головы (транскраниальные)\",\n    \"slugs\": [\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549637\": {\n    \"name\": \"УЗДГ чревного ствола\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549639\": {\n    \"name\": \"УЗИ 1 коленного сустава\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549641\": {\n    \"name\": \"УЗИ 1 плечевого сустава\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549643\": {\n    \"name\": \"УЗИ 2х коленных суставов\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_40_min\",\n      \"sakhanova_40_min\"\n    ]\n  },\n  \"549645\": {\n    \"name\": \"УЗИ 2х плечевых суставов\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549647\": {\n    \"name\": \"УЗИ Ахиллового сухожилия\",\n    \"slugs\": [\n      \"bekenova_25_min\",\n      \"rodionova_15_min\",\n      \"sakhanova_15_min\"\n    ]\n  },\n  \"549649\": {\n    \"name\": \"УЗИ лимфоузлов одной зоны\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549651\": {\n    \"name\": \"УЗИ мягких тканей\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549653\": {\n    \"name\": \"УЗИ слюнных желез\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549655\": {\n    \"name\": \"УЗИ органов мошонки\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549657\": {\n    \"name\": \"УЗИ, ТРУЗИ простаты (трансабдоминальное  или трансректальное)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549659\": {\n    \"name\": \"УЗИ почек (+надпочечники бонусом)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549661\": {\n    \"name\": \"УЗИ мочевого пузыря  с определением остаточной мочи\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549663\": {\n    \"name\": \"УЗИ щитовидной железы ( с допплерографией, паращитовидные железы)\",\n    \"slugs\": [\n      \"bekenova_20_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549665\": {\n    \"name\": \"УЗИ органов малого таза (гинекологические органы, беременность до 12 недель)\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549667\": {\n    \"name\": \"Повторное УЗИ ОМТ (гинекологические органы, беременность до 12 нед)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549669\": {\n    \"name\": \"УЗИ молочных (грудных) желез\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549671\": {\n    \"name\": \"УЗИ гортани\",\n    \"slugs\": [\n      \"bekenova_20_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549673\": {\n    \"name\": \"УЗИ надпочечников\",\n    \"slugs\": [\n      \"bekenova_20_min\",\n      \"rodionova_15_min\",\n      \"sakhanova_15_min\"\n    ]\n  },\n  \"549675\": {\n    \"name\": \"УЗИ нерва\",\n    \"slugs\": [\n      \"bekenova_40_min\",\n      \"rodionova_40_min\",\n      \"sakhanova_40_min\"\n    ]\n  },\n  \"549677\": {\n    \"name\": \"УЗИ органов брюшной полости (печень, желчный пузырь, поджелудочная железа, селезенка)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549679\": {\n    \"name\": \"УЗИ ОБП с функциональной пробой\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549681\": {\n    \"name\": \"УЗИ плевральных полостей\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_15_min\",\n      \"sakhanova_15_min\"\n    ]\n  },\n  \"549683\": {\n    \"name\": \"УЗИ почек (детский)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549685\": {\n    \"name\": \"УЗИ придаточных (гайморовых) пазух носа\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549687\": {\n    \"name\": \"УЗИ сердца\",\n    \"slugs\": []\n  },\n  \"549689\": {\n    \"name\": \"Определение пола плода\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549691\": {\n    \"name\": \"Цервикометрия (шейки матки при беременности) (СБ плода бонусом)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549693\": {\n    \"name\": \"УЗИ контроль ИАЖ  (СБ плода бонусом)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549695\": {\n    \"name\": \"УЗИ лонного сочленения (симфиз) (СБ плода бонусом)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549697\": {\n    \"name\": \"УЗИ плода 3Д-4Д\",\n    \"slugs\": [\n      \"bekenova_45_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549699\": {\n    \"name\": \"3Д-4Д снимки плода (только снимки)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549701\": {\n    \"name\": \"УЗИ плода+доплер+3Д,4Д\",\n    \"slugs\": [\n      \"bekenova_60_min\",\n      \"rodionova_80_min\",\n      \"sakhanova_80_min\"\n    ]\n  },\n  \"549703\": {\n    \"name\": \"Повтор 3D-4D (при не получившемся снимке)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_60_min\",\n      \"sakhanova_60_min\"\n    ]\n  },\n  \"549705\": {\n    \"name\": \"УЗИ Допплер плода\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549707\": {\n    \"name\": \"УЗИ  сердцебиения плода (бонусом на обвитие + положение плода)\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549709\": {\n    \"name\": \"УЗИ плода двойня 2Д (скрининговое, внескрининговое)\",\n    \"slugs\": [\n      \"bekenova_60_min\",\n      \"rodionova_80_min\",\n      \"sakhanova_80_min\"\n    ]\n  },\n  \"549711\": {\n    \"name\": \"УЗИ фетометрия\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_40_min\"\n    ]\n  },\n  \"549713\": {\n    \"name\": \"УЗИ фолликуломониторинг\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549715\": {\n    \"name\": \"УЗИ фолликуломониторинг вторичный\",\n    \"slugs\": [\n      \"bekenova_30_min\",\n      \"rodionova_20_min\",\n      \"sakhanova_20_min\"\n    ]\n  },\n  \"549717\": {\n    \"name\": \"УЗИ тазобедреного сустава (ТБС)\",\n    \"slugs\": [\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549719\": {\n    \"name\": \"УЗИ вилочковой железы\",\n    \"slugs\": [\n      \"rodionova_30_min\"\n    ]\n  },\n  \"549721\": {\n    \"name\": \"Нейросонография (УЗИ головы до 1 года)\",\n    \"slugs\": [\n      \"rodionova_30_min\",\n      \"sakhanova_30_min\"\n    ]\n  },\n  \"549723\": {\n    \"name\": \"Контроль УЗИ после м/а\",\n    \"slugs\": [\n      \"rodionova_15_min\"\n    ]\n  },\n  \"549725\": {\n    \"name\": \"Контроль УЗИ при введении ВМС\",\n    \"slugs\": [\n      \"rodionova_15_min\"\n    ]\n  }\n};\nconst config = $('Configuration').first().json;\nconst doctorByEnum = Object.fromEntries(Object.entries(config.doctorEnums).map(([slug, id]) => [id, slug]));\nconst items = [];\nconst seen = new Set();\nconst push = json => items.push({ json });\nconst fail = (lead_id, code, details = {}) => push({ outcome: 'failed', lead_id, code, ...details });\nconst id = value => /^\\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;\nlet expectedPage = 1;\nfor (const { json: response } of $input.all()) {\n  const data = response.body?.data;\n  if (response.statusCode !== 200 || !Array.isArray(data?.items) ||\n      expectedPage === null || id(data.page) !== expectedPage ||\n      (data.nextPage !== null && !(id(data.nextPage) > expectedPage))) {\n    return [{ json: { outcome: 'fetch_failed', code: 'invalid_kvik_page', page: expectedPage, http_status: response.statusCode ?? null } }];\n  }\n  expectedPage = data.nextPage === null ? null : id(data.nextPage);\n  for (const lead of data.items) {\n    const leadId = id(lead?.id);\n    if (!leadId) {\n      fail(null, 'invalid_lead_id');\n      continue;\n    }\n    if (seen.has(leadId)) continue;\n    seen.add(leadId);\n    const created = id(lead.created_at);\n    if (!created) {\n      fail(leadId, 'invalid_created_at');\n      continue;\n    }\n    if (created < config.dayStart || created > config.runStarted) {\n      push({ outcome: 'skipped', code: 'outside_creation_window' });\n      continue;\n    }\n    const fields = Array.isArray(lead.custom_fields_values) ? lead.custom_fields_values : [];\n    const value = (fieldId, key) => {\n      const entries = fields.filter(field => id(field?.field_id) === fieldId);\n      const values = entries[0]?.values;\n      return entries.length === 1 && Array.isArray(values) && values.length === 1 ? values[0]?.[key] : null;\n    };\n    const start = id(value(config.appointmentFieldId, 'value'));\n    const date = start && DateTime.fromSeconds(start, { zone: config.timezone });\n    if (!date?.isValid) {\n      fail(leadId, 'invalid_appointment');\n      continue;\n    }\n    if (start <= config.runStarted || date.toISODate() > config.to) {\n      push({ outcome: 'skipped', code: 'outside_appointment_window' });\n      continue;\n    }\n    const doctorEnum = id(value(config.doctorFieldId, 'enum_id'));\n    if (!doctorEnum) {\n      fail(leadId, 'missing_or_invalid_doctor_enum');\n      continue;\n    }\n    const doctor = doctorByEnum[doctorEnum];\n    if (!doctor) {\n      push({ outcome: 'skipped', code: 'doctor_not_allowlisted' });\n      continue;\n    }\n    const serviceEnum = id(value(config.serviceFieldId, 'enum_id'));\n    const service = catalog[serviceEnum];\n    if (!service) {\n      fail(leadId, 'unknown_service_enum', { doctor_enum: doctorEnum, service_enum: serviceEnum });\n      continue;\n    }\n    const options = [...new Set(service.slugs.filter(slug => slug.startsWith(doctor + '_')))];\n    if (options.length !== 1) {\n      fail(leadId, 'no_unique_event_slug', { doctor_enum: doctorEnum, service_enum: serviceEnum });\n      continue;\n    }\n    const nameValue = value(config.patientNameFieldId, 'value');\n    const name = typeof nameValue === 'string' ? nameValue.trim() : '';\n    const phoneValue = value(config.patientPhoneFieldId, 'value');\n    let phone = typeof phoneValue === 'string' ? phoneValue.trim().replace(/[ ().-]/g, '') : '';\n    if (/^[78]\\d{10}$/.test(phone)) phone = '+7' + phone.slice(1);\n    if (!name || name.length > 200 || !/^\\+[1-9]\\d{6,14}$/.test(phone)) {\n      fail(leadId, 'missing_or_invalid_patient_contact', { event_type_slug: options[0] });\n      continue;\n    }\n    push({\n      outcome: 'ready',\n      lead_id: leadId,\n      event_type_slug: options[0],\n      start_at: date.toUTC().toISO({ suppressMilliseconds: true }),\n      name,\n      phone,\n      procedure: config.procedureOverrides[serviceEnum] ?? service.name,\n    });\n  }\n}\nif (expectedPage !== null) return [{ json: { outcome: 'fetch_failed', code: 'incomplete_kvik_pagination', page: expectedPage } }];\nreturn items.length ? items : [{ json: { outcome: 'empty' } }];"
+      }
+    },
+    {
+      "id": "loop",
+      "name": "Process one lead",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "ready",
+      "name": "Valid candidate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ready-condition",
+              "leftValue": "={{ $json.outcome }}",
+              "rightValue": "ready",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "get-questions",
+      "name": "Get CalNode questions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        100
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $(\"Configuration\").first().json.calnodeBaseUrl.replace(/\\/$/, \"\") + \"/v1/event-types/\" + encodeURIComponent($json.event_type_slug) + \"/questions\" }}",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "prepare",
+      "name": "Prepare CalNode booking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const lead = $('Valid candidate?').itemMatching(0).json;\nconst config = $('Configuration').first().json;\nconst response = $input.first().json;\nconst details = { lead_id: lead.lead_id, event_type_slug: lead.event_type_slug, start_at: lead.start_at };\nconst fail = code => [{ json: { ...details, outcome: 'failed', code, http_status: response.statusCode ?? null } }];\nconst questions = response.body?.items;\nif (response.statusCode !== 200 || !Array.isArray(questions)) return fail('calnode_questions_unavailable');\nconst required = questions.filter(question => question.required);\nif (required.length !== 1 || !required[0].id || !['text', 'select'].includes(required[0].type)) {\n  return fail('unsupported_required_calnode_questions');\n}\nconst procedure = required[0];\nif (procedure.type === 'select' && !procedure.options?.includes(lead.procedure)) return fail('procedure_dropdown_mismatch');\nif (config.dryRun) return [{ json: { ...details, outcome: 'would_create' } }];\nreturn [{ json: { ...details, outcome: 'submit', booking: {\n  event_type_slug: lead.event_type_slug,\n  start_at: lead.start_at,\n  name: lead.name,\n  contact_method: 'phone',\n  contact_phone: lead.phone,\n  timezone: config.timezone,\n  language: 'ru-RU',\n  answers: [{ question_id: procedure.id, value: lead.procedure }],\n} } }];"
+      }
+    },
+    {
+      "id": "submit",
+      "name": "Write booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "submit-condition",
+              "leftValue": "={{ $json.outcome }}",
+              "rightValue": "submit",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "post",
+      "name": "Create CalNode booking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $(\"Configuration\").first().json.calnodeBaseUrl.replace(/\\/$/, \"\") + \"/v1/bookings\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ \"n8n:amocrm:\" + $(\"Configuration\").first().json.sourceWorkspaceId + \":\" + $json.lead_id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.booking) }}",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "pace",
+      "name": "Pace CalNode writes",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        100
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 4,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "record",
+      "name": "Record booking result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const request = $('Write booking?').itemMatching(0).json;\nconst response = $input.first().json;\nconst status = response.statusCode ?? null;\nconst body = response.body;\nconst confirmed = status === 201 && body?.status === 'confirmed' && typeof body.id === 'string' && body.id;\nconst details = { lead_id: request.lead_id, event_type_slug: request.event_type_slug, start_at: request.start_at };\nif (confirmed) return [{ json: { ...details, outcome: 'confirmed', booking_id: body.id } }];\nconst code = body?.payment_required ? 'payment_required'\n  : status === 409 ? 'slot_unavailable_or_request_in_progress'\n  : status === 422 ? 'booking_limit_or_idempotency_conflict'\n  : status == null || status >= 500 ? 'booking_outcome_uncertain' : 'calnode_rejected_booking';\nreturn [{ json: { ...details, outcome: 'failed', code, http_status: status } }];"
+      }
+    },
+    {
+      "id": "summary",
+      "name": "Sync summary and failure log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const config = $('Configuration').first().json;\nconst counts = {};\nconst skipped = {};\nconst bookings = [];\nconst failures = [];\nfor (const { json: { outcome, code, lead_id, event_type_slug, start_at, booking_id, doctor_enum, service_enum, http_status, page } } of $input.all()) {\n  counts[outcome] = (counts[outcome] ?? 0) + 1;\n  if (outcome === 'skipped') skipped[code] = (skipped[code] ?? 0) + 1;\n  if (outcome === 'confirmed' || outcome === 'would_create') bookings.push({ outcome, lead_id, event_type_slug, start_at, booking_id });\n  if (outcome === 'failed' || outcome === 'fetch_failed') failures.push({ lead_id, code, event_type_slug, start_at, doctor_enum, service_enum, http_status, page });\n}\nreturn [{ json: { dry_run: config.dryRun, date: config.from, appointment_to: config.to, counts, skipped, bookings, failures } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Run as n8n tool": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 10 minutes": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Fetch KVIK leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch KVIK leads": {
+      "main": [
+        [
+          {
+            "node": "Map CRM bookings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map CRM bookings": {
+      "main": [
+        [
+          {
+            "node": "Process one lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process one lead": {
+      "main": [
+        [
+          {
+            "node": "Sync summary and failure log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Valid candidate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid candidate?": {
+      "main": [
+        [
+          {
+            "node": "Get CalNode questions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Process one lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get CalNode questions": {
+      "main": [
+        [
+          {
+            "node": "Prepare CalNode booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare CalNode booking": {
+      "main": [
+        [
+          {
+            "node": "Write booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write booking?": {
+      "main": [
+        [
+          {
+            "node": "Create CalNode booking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Process one lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CalNode booking": {
+      "main": [
+        [
+          {
+            "node": "Record booking result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record booking result": {
+      "main": [
+        [
+          {
+            "node": "Pace CalNode writes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace CalNode writes": {
+      "main": [
+        [
+          {
+            "node": "Process one lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Almaty",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false
+  },
+  "pinData": {},
+  "tags": []
+}

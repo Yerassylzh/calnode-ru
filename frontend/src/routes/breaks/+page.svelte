@@ -1,306 +1,186 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type DoctorBreak, type AvailabilityRule, type TeamMember } from '$lib/api';
+	import { CalendarDays, Clock, Plus, Repeat, UserRound } from '@lucide/svelte';
+	import { getLocalTimeZone, parseDate, today } from '@internationalized/date';
+	import { toast } from 'svelte-sonner';
+	import { api, type AvailabilityRule, type DoctorBreak, type TeamMember } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Badge } from '$lib/components/ui/badge';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
-	import * as Select from '$lib/components/ui/select';
-	import { DatePicker } from '$lib/components/ui/date-picker';
-	import { toast } from 'svelte-sonner';
-	import { today, getLocalTimeZone } from '@internationalized/date';
-	import { cn } from '$lib/utils';
 
-	// ── State ─────────────────────────────────────────────────────────────────────
-	let loading = $state(true);
-	let doctors = $state<TeamMember[]>([]);
+	let doctors = $state<Pick<TeamMember, 'id' | 'name' | 'email' | 'timezone'>[]>([]);
 	let selectedDoctorId = $state('');
-
+	let doctorsLoading = $state(true);
+	let doctorsFailed = $state(false);
 	let breaks = $state<DoctorBreak[]>([]);
 	let breaksLoading = $state(false);
+	let breaksFailed = $state(false);
+	let needsHours = $state(false);
+	let loadVersion = 0;
 
-	let rules = $state<AvailabilityRule[]>([]);
-	let rulesLoading = $state(false);
-
-	// Today's ISO date string (YYYY-MM-DD)
-	const localTz = getLocalTimeZone();
-	const todayIso = today(localTz).toString();
-
-	// Selected date for viewing and adding breaks (defaults to today)
-	let selectedDate = $state(todayIso);
-
-	// Form fields
-	let applyMode = $state<'date' | 'weekly'>('date');
+	let selectedDate = $state('');
 	let startTime = $state('13:00');
 	let endTime = $state('14:00');
-	let breakTitle = $state('Обед');
-	let saving = $state(false);
+	let breakTitle = $state('');
 	let formError = $state('');
-
-	// Master list toggle
-	let showAllBreaks = $state(false);
-
-	// Delete dialog state
+	let saving = $state(false);
+	let settingHours = $state(false);
+	let deleting = $state(false);
 	let deleteOpen = $state(false);
-	let deleteTargetBreak = $state<DoctorBreak | null>(null);
+	let deleteTarget = $state<DoctorBreak | null>(null);
 
-	// Time options for dropdowns (07:00 to 22:00 in 15-minute increments)
-	const TIME_OPTIONS: string[] = [];
-	for (let h = 7; h <= 22; h++) {
-		for (const m of [0, 15, 30, 45]) {
-			if (h === 22 && m > 0) break;
-			TIME_OPTIONS.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+	const busy = $derived(saving || settingHours || deleting || deleteOpen);
+	const selectedDoctor = $derived(doctors.find((doctor) => doctor.id === selectedDoctorId));
+	const timezone = $derived(selectedDoctor?.timezone || getLocalTimeZone());
+	const todayIso = $derived(today(timezone).toString());
+	const scheduledDays = $derived.by(() => {
+		const days = new Map<string, DoctorBreak[]>();
+		const dated = breaks.filter((item) => item.kind === 'date' && item.date);
+		dated.sort((a, b) =>
+			a.date!.localeCompare(b.date!) || a.start_time.localeCompare(b.start_time)
+		);
+		for (const item of dated) {
+			const date = item.date!;
+			const items = days.get(date) ?? [];
+			items.push(item);
+			days.set(date, items);
 		}
-	}
+		return [...days];
+	});
+	const upcoming = $derived(scheduledDays.filter(([date]) => date >= todayIso));
+	const past = $derived(scheduledDays.filter(([date]) => date < todayIso).reverse());
+	const recurring = $derived(breaks.filter((item) => item.kind === 'weekly'));
 
-	const selectedDoctor = $derived(
-		doctors.find((d) => d.id === selectedDoctorId) ?? null
-	);
-
-	// Date calculations
-	function shiftIsoDate(iso: string, deltaDays: number): string {
-		if (!iso) return iso;
-		const [y, m, d] = iso.split('-').map(Number);
-		const dt = new Date(y, m - 1, d);
-		dt.setDate(dt.getDate() + deltaDays);
-		const Y = dt.getFullYear();
-		const M = String(dt.getMonth() + 1).padStart(2, '0');
-		const D = String(dt.getDate()).padStart(2, '0');
-		return `${Y}-${M}-${D}`;
-	}
-
-	function getDayOfWeek(iso: string): number {
-		if (!iso) return 1;
-		const [y, m, d] = iso.split('-').map(Number);
-		return new Date(y, m - 1, d).getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-	}
-
-	const selectedDayOfWeek = $derived(getDayOfWeek(selectedDate));
-
-	const dateInfo = $derived.by(() => {
-		if (!selectedDate) {
-			return { title: '', subtitle: '', isToday: false, isTomorrow: false, isYesterday: false };
-		}
-		const [y, m, d] = selectedDate.split('-').map(Number);
-		const dt = new Date(y, m - 1, d);
-		const isToday = selectedDate === todayIso;
-		const isTomorrow = selectedDate === shiftIsoDate(todayIso, 1);
-		const isYesterday = selectedDate === shiftIsoDate(todayIso, -1);
-
-		const isRu = $localeTag.startsWith('ru');
-		const weekday = dt.toLocaleDateString(isRu ? 'ru-RU' : 'en-US', { weekday: 'long' });
-		const formattedDate = dt.toLocaleDateString(isRu ? 'ru-RU' : 'en-US', {
-			day: 'numeric',
-			month: 'long',
-			year: 'numeric'
+	function formatDate(date: string) {
+		return parseDate(date).toDate('UTC').toLocaleDateString($localeTag, {
+			weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
 		});
-
-		let prefix = '';
-		if (isToday) prefix = isRu ? 'Сегодня' : 'Today';
-		else if (isTomorrow) prefix = isRu ? 'Завтра' : 'Tomorrow';
-		else if (isYesterday) prefix = isRu ? 'Вчера' : 'Yesterday';
-
-		return {
-			title: prefix ? `${prefix}, ${formattedDate}` : formattedDate,
-			subtitle: weekday.charAt(0).toUpperCase() + weekday.slice(1),
-			isToday,
-			isTomorrow,
-			isYesterday
-		};
-	});
-
-	const formattedShortDate = $derived.by(() => {
-		if (!selectedDate) return '';
-		const [y, m, d] = selectedDate.split('-').map(Number);
-		const dt = new Date(y, m - 1, d);
-		return dt.toLocaleDateString($localeTag.startsWith('ru') ? 'ru-RU' : 'en-US', {
-			day: 'numeric',
-			month: 'short'
-		});
-	});
-
-	const weekdayName = $derived.by(() => {
-		return $t(`doctorBreaks.day.${selectedDayOfWeek}`);
-	});
-
-	// Breaks active on the selected date
-	const breaksForSelectedDate = $derived.by(() => {
-		if (!selectedDate) return [];
-		return breaks
-			.filter((b) => {
-				if (b.kind === 'date' && b.date === selectedDate) return true;
-				if (b.kind === 'weekly' && b.day_of_week === selectedDayOfWeek) return true;
-				return false;
-			})
-			.sort((a, b) => a.start_time.localeCompare(b.start_time));
-	});
-
-	// Duration calculation string
-	function getDurationLabel(start: string, end: string) {
-		const [h1, m1] = start.split(':').map(Number);
-		const [h2, m2] = end.split(':').map(Number);
-		const totalMins = (h2 * 60 + m2) - (h1 * 60 + m1);
-		if (totalMins <= 0) return '';
-		const h = Math.floor(totalMins / 60);
-		const m = totalMins % 60;
-		if (h > 0 && m > 0) return `${h} ч ${m} мин`;
-		if (h > 0) return `${h} ч`;
-		return `${m} мин`;
 	}
 
-	const currentDuration = $derived(getDurationLabel(startTime, endTime));
-
-	// ── Loaders ───────────────────────────────────────────────────────────────────
-	onMount(async () => {
-		await loadDoctors();
-	});
+	onMount(() => { void loadDoctors(); });
 
 	async function loadDoctors() {
-		loading = true;
+		doctorsLoading = true;
+		doctorsFailed = false;
 		try {
-			if ($currentUser?.is_admin) {
-				const users = await api.get<TeamMember[]>('/v1/users');
-				doctors = users ?? [];
-			} else if ($currentUser) {
-				doctors = [{
-					id: $currentUser.id,
-					name: $currentUser.name,
-					email: $currentUser.email,
-					timezone: $currentUser.timezone,
-					is_admin: $currentUser.is_admin,
-					is_owner: $currentUser.is_owner,
-					role: $currentUser.role,
-					email_login: false,
-					created_at: '',
-					archived: false,
-					teams: []
-				}];
+			const user = $currentUser;
+			if (user?.is_admin) {
+				doctors = await api.get<TeamMember[]>('/v1/users') ?? [];
+			} else if (user) {
+				doctors = [user];
 			}
-			if (doctors.length > 0) {
-				selectedDoctorId = doctors[0].id;
-				await loadDoctorData(selectedDoctorId);
-			}
-		} catch (e: any) {
-			toast.error(e.message || $t('common.error'));
+			if (doctors.length) void selectDoctor(doctors[0].id);
+		} catch {
+			doctorsFailed = true;
 		} finally {
-			loading = false;
+			doctorsLoading = false;
 		}
 	}
 
-	async function loadDoctorData(docId: string) {
-		if (!docId) return;
-		await Promise.all([loadBreaks(docId), loadRules(docId)]);
+	async function selectDoctor(id: string) {
+		selectedDoctorId = id;
+		selectedDate = todayIso;
+		startTime = '13:00';
+		endTime = '14:00';
+		breakTitle = '';
+		formError = '';
+		breaks = [];
+		needsHours = false;
+		await loadSchedule();
 	}
 
-	async function loadBreaks(docId: string) {
+	async function loadSchedule() {
+		const id = encodeURIComponent(selectedDoctorId);
+		const version = ++loadVersion;
 		breaksLoading = true;
-		try {
-			const res = await api.get<{ items: DoctorBreak[] }>(`/v1/doctor-breaks?user_id=${docId}`);
-			breaks = res.items ?? [];
-		} catch {
-			breaks = [];
-		} finally {
-			breaksLoading = false;
-		}
+		breaksFailed = false;
+		await Promise.all([
+			api.get<{ items: DoctorBreak[] }>(`/v1/doctor-breaks?user_id=${id}`)
+				.then((result) => {
+					if (version === loadVersion) breaks = result.items ?? [];
+				})
+				.catch(() => {
+					if (version === loadVersion) breaksFailed = true;
+				})
+				.finally(() => {
+					if (version === loadVersion) breaksLoading = false;
+				}),
+			api.get<{ items: AvailabilityRule[] }>(`/v1/availability-rules?user_id=${id}`)
+				.then((result) => {
+					if (version === loadVersion) needsHours = !result.items?.length;
+				})
+				.catch(() => {
+					if (version === loadVersion) needsHours = false;
+				})
+		]);
 	}
 
-	async function loadRules(docId: string) {
-		rulesLoading = true;
-		try {
-			const res = await api.get<{ items: AvailabilityRule[] }>(`/v1/availability-rules?user_id=${docId}`);
-			rules = res.items ?? [];
-		} catch {
-			rules = [];
-		} finally {
-			rulesLoading = false;
-		}
-	}
-
-	async function onDoctorChange(docId: string) {
-		selectedDoctorId = docId;
-		await loadDoctorData(docId);
-	}
-
-	// ── Set standard hours for doctor if empty ─────────────────────────────────────
 	async function setStandardWorkingHours() {
-		if (!selectedDoctorId) return;
+		if (busy) return;
+		settingHours = true;
 		try {
-			// Mon-Fri 09:00 - 18:00
-			for (let dow = 1; dow <= 5; dow++) {
+			for (let day = 1; day <= 5; day++) {
 				await api.post('/v1/availability-rules', {
-					user_id: selectedDoctorId,
-					day_of_week: dow,
-					start_time: '09:00',
-					end_time: '18:00'
+					user_id: selectedDoctorId, day_of_week: day, start_time: '09:00', end_time: '18:00'
 				});
 			}
-			await loadRules(selectedDoctorId);
 			toast.success($t('doctorBreaks.hoursUpdated'));
-		} catch (e: any) {
-			toast.error(e.message || $t('common.error'));
+		} catch {
+			toast.error($t('doctorBreaks.hoursFailed'));
+		} finally {
+			await loadSchedule();
+			settingHours = false;
 		}
 	}
 
-	// ── Save Break ────────────────────────────────────────────────────────────────
-	async function handleAddBreak() {
+	async function saveBreak(event: SubmitEvent) {
+		event.preventDefault();
+		if (busy || !selectedDoctorId) return;
 		formError = '';
-		if (!selectedDoctorId) {
-			formError = $t('doctorBreaks.error.doctorRequired');
-			return;
-		}
 		if (startTime >= endTime) {
 			formError = $t('doctorBreaks.error.timeInvalid');
 			return;
 		}
-
 		saving = true;
 		try {
-			if (applyMode === 'weekly') {
-				await api.post('/v1/doctor-breaks', {
-					user_id: selectedDoctorId,
-					kind: 'weekly',
-					day_of_week: selectedDayOfWeek,
-					start_time: startTime,
-					end_time: endTime,
-					title: breakTitle.trim() || 'Обед'
-				});
-			} else {
-				await api.post('/v1/doctor-breaks', {
-					user_id: selectedDoctorId,
-					kind: 'date',
-					date: selectedDate,
-					start_time: startTime,
-					end_time: endTime,
-					title: breakTitle.trim() || 'Обед'
-				});
-			}
-
+			const item = await api.post<DoctorBreak>('/v1/doctor-breaks', {
+				user_id: selectedDoctorId,
+				kind: 'date',
+				date: selectedDate,
+				start_time: startTime,
+				end_time: endTime,
+				title: breakTitle.trim() || $t('doctorBreaks.defaultTitle')
+			});
+			breaks = [...breaks, item];
+			breakTitle = '';
 			toast.success($t('doctorBreaks.addedSuccess'));
-			await loadBreaks(selectedDoctorId);
-		} catch (e: any) {
-			formError = e.message || $t('common.error');
+		} catch {
+			formError = $t('doctorBreaks.error.saveFailed');
 		} finally {
 			saving = false;
 		}
 	}
 
-	function confirmDelete(b: DoctorBreak) {
-		deleteTargetBreak = b;
+	function confirmDelete(item: DoctorBreak) {
+		deleteTarget = item;
 		deleteOpen = true;
 	}
 
-	async function doDelete() {
-		if (!deleteTargetBreak) return;
+	async function deleteBreak() {
+		if (!deleteTarget || deleting) return;
+		const id = deleteTarget.id;
+		deleting = true;
 		try {
-			await api.del(`/v1/doctor-breaks/${deleteTargetBreak.id}`);
+			await api.del(`/v1/doctor-breaks/${id}`);
+			breaks = breaks.filter((item) => item.id !== id);
 			toast.success($t('doctorBreaks.deletedSuccess'));
-			await loadBreaks(selectedDoctorId);
-		} catch (e: any) {
-			toast.error(e.message || $t('common.error'));
+		} catch {
+			toast.error($t('doctorBreaks.error.deleteFailed'));
 		} finally {
-			deleteTargetBreak = null;
+			deleting = false;
+			deleteTarget = null;
 		}
 	}
 </script>
@@ -309,424 +189,192 @@
 	<title>{$t('doctorBreaks.pageTitle')}</title>
 </svelte:head>
 
-<div class="max-w-5xl mx-auto py-6 px-4 space-y-6">
-	<!-- ── Header ──────────────────────────────────────────────────────────── -->
-	<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b">
-		<div>
-			<h1 class="text-2xl font-bold tracking-tight text-foreground">
-				{$t('doctorBreaks.heading')}
-			</h1>
-			<p class="text-sm text-muted-foreground mt-0.5">
-				{$t('doctorBreaks.subtitle')}
-			</p>
-		</div>
-
-		<!-- Doctor Selection -->
-		<div class="flex items-center gap-3">
-			{#if doctors.length > 1 && $currentUser?.is_admin}
-				<div class="w-72">
-					<Select.Root type="single" value={selectedDoctorId} onValueChange={(val) => { if (val) onDoctorChange(val); }}>
-						<Select.Trigger class="w-full">
-							<span class="truncate">
-								{selectedDoctor ? selectedDoctor.name : $t('doctorBreaks.doctorPlaceholder')}
-							</span>
-						</Select.Trigger>
-						<Select.Content>
-							{#each doctors as doc}
-								<Select.Item value={doc.id} label={doc.name}>
-									<div class="flex flex-col text-left py-0.5">
-										<span class="font-medium">{doc.name}</span>
-										<span class="text-xs text-muted-foreground">{doc.email}</span>
-									</div>
-								</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
-				</div>
-			{:else if selectedDoctor}
-				<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-muted/40 text-sm">
-					<span class="font-medium text-foreground">{selectedDoctor.name}</span>
-					<Badge variant="secondary" class="text-xs">{$t('doctorBreaks.doctorRole')}</Badge>
-				</div>
+{#snippet breakRow(item: DoctorBreak)}
+	<li class="flex items-center gap-3 px-4 py-3 sm:px-5">
+		<div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+			{#if item.kind === 'weekly'}
+				<Repeat class="size-4" aria-hidden="true" />
+			{:else}
+				<Clock class="size-4" aria-hidden="true" />
 			{/if}
 		</div>
-	</div>
-
-	<!-- ── Missing working hours helper (quiet) ───────────────────────────────── -->
-	{#if !rulesLoading && rules.length === 0}
-		<div class="flex items-center justify-between p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-sm">
-			<span>{$t('doctorBreaks.noHoursSet')}.</span>
-			<Button variant="outline" size="sm" onclick={setStandardWorkingHours} class="border-amber-500/40 hover:bg-amber-500/20 text-xs">
-				{$t('doctorBreaks.setStandardHours')}
-			</Button>
+		<div class="min-w-0 flex-1">
+			<div class="text-sm font-semibold tabular-nums">{item.start_time}–{item.end_time}</div>
+			<div class="wrap-break-word text-sm text-muted-foreground">{item.title}</div>
+			{#if item.kind === 'weekly'}
+				<div class="text-xs text-muted-foreground">{$t(`doctorBreaks.day.${item.day_of_week}`)}</div>
+			{/if}
 		</div>
-	{/if}
+		<Button variant="ghost" class="h-10 text-muted-foreground hover:text-destructive"
+			disabled={busy} onclick={() => confirmDelete(item)}>
+			{$t('common.delete')}
+		</Button>
+	</li>
+{/snippet}
 
-	<!-- ── Main 2-Column Clean Interface ────────────────────────────────────── -->
-	<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-		<!-- ── Left Column: Day Navigator & Breaks for Selected Date (7 cols) ─── -->
-		<div class="lg:col-span-7 space-y-4">
-			<!-- Date Selector Toolbar -->
-			<div class="flex items-center justify-between gap-2 p-2 rounded-xl border bg-card shadow-sm">
-				<div class="flex items-center gap-1.5">
-					<Button
-						variant="outline"
-						size="icon"
-						class="size-8"
-						onclick={() => selectedDate = shiftIsoDate(selectedDate, -1)}
-						title={$t('doctorBreaks.prevDay')}
-					>
-						<svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<polyline points="15 18 9 12 15 6" />
-						</svg>
-					</Button>
-
-					<Button
-						variant={selectedDate === todayIso ? 'default' : 'outline'}
-						size="sm"
-						class="h-8 text-xs font-medium px-3"
-						onclick={() => selectedDate = todayIso}
-					>
-						{$t('doctorBreaks.today')}
-					</Button>
-
-					<Button
-						variant="outline"
-						size="icon"
-						class="size-8"
-						onclick={() => selectedDate = shiftIsoDate(selectedDate, 1)}
-						title={$t('doctorBreaks.nextDay')}
-					>
-						<svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<polyline points="9 18 15 12 9 6" />
-						</svg>
-					</Button>
-				</div>
-
-				<div class="flex items-center">
-					<DatePicker bind:value={selectedDate} placeholder={$t('doctorBreaks.pickDate')} class="h-8 text-xs w-[170px]" />
-				</div>
-			</div>
-
-			<!-- Breaks on this Day Card -->
-			<div class="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-				<!-- Date Heading Banner -->
-				<div class="flex items-start justify-between border-b pb-3.5">
-					<div>
-						<div class="flex items-center gap-2">
-							<h2 class="text-base font-semibold text-foreground">
-								{dateInfo.title}
-							</h2>
-							{#if dateInfo.isToday}
-								<Badge variant="default" class="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] font-semibold h-4 px-1.5">
-									{$t('doctorBreaks.today')}
-								</Badge>
-							{/if}
-						</div>
-						<p class="text-xs text-muted-foreground mt-0.5 capitalize">
-							{dateInfo.subtitle}
-						</p>
-					</div>
-
-					<Badge variant="secondary" class="font-mono text-xs">
-						{breaksForSelectedDate.length} {breaksForSelectedDate.length === 1 ? 'перерыв' : 'перерывов'}
-					</Badge>
-				</div>
-
-				<!-- Break List -->
-				{#if breaksLoading}
-					<div class="py-10 text-center text-sm text-muted-foreground">
-						{$t('common.loading')}
-					</div>
-				{:else if breaksForSelectedDate.length === 0}
-					<div class="py-12 px-4 text-center rounded-lg border border-dashed flex flex-col items-center justify-center space-y-2">
-						<div class="size-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
-							<svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<circle cx="12" cy="12" r="10" />
-								<polyline points="12 6 12 12 16 14" />
-							</svg>
-						</div>
-						<div class="font-medium text-sm text-foreground">
-							{$t('doctorBreaks.noBreaksOnDate')}
-						</div>
-						<p class="text-xs text-muted-foreground max-w-sm">
-							{$t('doctorBreaks.noBreaksOnDateDesc')}
-						</p>
-					</div>
-				{:else}
-					<div class="space-y-2.5">
-						{#each breaksForSelectedDate as b (b.id)}
-							<div class="flex items-center justify-between p-3 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors">
-								<div class="flex items-center gap-3">
-									<div class="size-8 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
-										<svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-											<path d="M10 2v2"/><path d="M14 2v2"/>
-											<path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h12Z"/>
-											<path d="M6 2v2"/>
-										</svg>
-									</div>
-
-									<div>
-										<div class="flex items-center gap-2">
-											<span class="font-semibold text-sm font-mono text-foreground">
-												{b.start_time} — {b.end_time}
-											</span>
-											<span class="text-xs text-muted-foreground font-medium">
-												({getDurationLabel(b.start_time, b.end_time)})
-											</span>
-										</div>
-
-										<div class="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-											<span class="font-medium text-foreground">{b.title}</span>
-											<span>•</span>
-											{#if b.kind === 'weekly'}
-												<Badge variant="secondary" class="text-[10px] font-normal py-0 px-1.5 h-4">
-													{$t('doctorBreaks.badgeWeekly', { day: $t(`doctorBreaks.dayShort.${b.day_of_week}`) })}
-												</Badge>
-											{:else}
-												<Badge variant="outline" class="text-[10px] font-normal py-0 px-1.5 h-4">
-													{$t('doctorBreaks.badgeDate', { date: b.date || '' })}
-												</Badge>
-											{/if}
-										</div>
-									</div>
-								</div>
-
-								<Button
-									variant="ghost"
-									size="icon"
-									class="size-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-									onclick={() => confirmDelete(b)}
-									title="Удалить"
-								>
-									<svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-										<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-										<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-									</svg>
-								</Button>
-							</div>
-						{/each}
-					</div>
+{#snippet dayList(days: typeof upcoming)}
+	{#each days as [date, items] (date)}
+		<div class="overflow-hidden rounded-xl border bg-card">
+			<h3 class="flex flex-wrap items-center gap-2 border-b bg-muted/40 px-4 py-2.5 text-sm font-medium sm:px-5">
+				{#if date === todayIso}
+					<span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold">{$t('doctorBreaks.today')}</span>
 				{/if}
-			</div>
+				<time datetime={date} class="capitalize">{formatDate(date)}</time>
+			</h3>
+			<ul class="divide-y">
+				{#each items as item (item.id)}
+					{@render breakRow(item)}
+				{/each}
+			</ul>
 		</div>
+	{/each}
+{/snippet}
 
-		<!-- ── Right Column: Add Break Form (5 cols) ────────────────────────── -->
-		<div class="lg:col-span-5">
-			<div class="rounded-xl border bg-card p-5 shadow-sm space-y-4">
-				<div>
-					<h2 class="text-base font-semibold text-foreground">
-						{$t('doctorBreaks.addBreak')}
-					</h2>
-					<p class="text-xs text-muted-foreground mt-0.5">
-						{$t('doctorBreaks.addBreakDesc')}
-					</p>
-				</div>
-
-				<div class="space-y-4 pt-1">
-					<!-- Repetition toggle -->
-					<div class="space-y-1.5">
-						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-							{$t('doctorBreaks.applyMode')}
-						</span>
-						<div class="grid grid-cols-2 gap-1 p-1 bg-muted/60 rounded-lg">
-							<button
-								type="button"
-								class={cn(
-									'py-2 px-2 text-xs font-medium rounded-md transition-all text-center',
-									applyMode === 'date'
-										? 'bg-background shadow-sm text-foreground font-semibold'
-										: 'text-muted-foreground hover:text-foreground'
-								)}
-								onclick={() => applyMode = 'date'}
-							>
-								<div>{$t('doctorBreaks.applyThisDate')}</div>
-								<div class="text-[10px] text-muted-foreground font-normal truncate mt-0.5">
-									{formattedShortDate}
-								</div>
-							</button>
-
-							<button
-								type="button"
-								class={cn(
-									'py-2 px-2 text-xs font-medium rounded-md transition-all text-center',
-									applyMode === 'weekly'
-										? 'bg-background shadow-sm text-foreground font-semibold'
-										: 'text-muted-foreground hover:text-foreground'
-								)}
-								onclick={() => applyMode = 'weekly'}
-							>
-								<div>{$t('doctorBreaks.applyWeekly')}</div>
-								<div class="text-[10px] text-muted-foreground font-normal truncate mt-0.5">
-									{weekdayName}
-								</div>
-							</button>
-						</div>
-					</div>
-
-					<!-- Time inputs: Start and End -->
-					<div class="space-y-1.5">
-						<div class="flex items-center justify-between">
-							<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-								{$t('doctorBreaks.timeRange')}
-							</span>
-							{#if currentDuration}
-								<span class="text-xs font-medium text-primary">
-									{$t('doctorBreaks.duration')}: {currentDuration}
-								</span>
-							{/if}
-						</div>
-
-						<div class="grid grid-cols-2 gap-3">
-							<div class="space-y-1">
-								<span class="text-xs text-muted-foreground">{$t('doctorBreaks.timeFrom')}</span>
-								<Select.Root type="single" value={startTime} onValueChange={(v) => { if (v) startTime = v; }}>
-									<Select.Trigger class="w-full font-mono text-sm">
-										{startTime}
-									</Select.Trigger>
-									<Select.Content class="max-h-56 overflow-y-auto">
-										{#each TIME_OPTIONS as t}
-											<Select.Item value={t} label={t} class="font-mono text-sm">{t}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
-							</div>
-
-							<div class="space-y-1">
-								<span class="text-xs text-muted-foreground">{$t('doctorBreaks.timeTo')}</span>
-								<Select.Root type="single" value={endTime} onValueChange={(v) => { if (v) endTime = v; }}>
-									<Select.Trigger class="w-full font-mono text-sm">
-										{endTime}
-									</Select.Trigger>
-									<Select.Content class="max-h-56 overflow-y-auto">
-										{#each TIME_OPTIONS as t}
-											<Select.Item value={t} label={t} class="font-mono text-sm">{t}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
-							</div>
-						</div>
-					</div>
-
-					<!-- Title / Reason -->
-					<div class="space-y-1.5">
-						<label for="break-title-input" class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-							{$t('doctorBreaks.titleLabel')}
-						</label>
-						<Input
-							id="break-title-input"
-							type="text"
-							bind:value={breakTitle}
-							placeholder={$t('doctorBreaks.titlePlaceholder')}
-							class="text-sm"
-						/>
-					</div>
-
-					<!-- Error alert -->
-					{#if formError}
-						<div class="text-xs text-destructive bg-destructive/10 p-2.5 rounded-md">
-							{formError}
-						</div>
-					{/if}
-
-					<!-- Submit Button -->
-					<Button
-						class="w-full font-medium"
-						onclick={handleAddBreak}
-						disabled={saving}
-					>
-						{#if saving}
-							<svg class="animate-spin -ml-1 mr-2 size-4 text-white" viewBox="0 0 24 24" fill="none">
-								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-							</svg>
-							{$t('doctorBreaks.submitting')}
-						{:else}
-							{$t('doctorBreaks.submit')}
-						{/if}
-					</Button>
-				</div>
-			</div>
+<div class="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-9">
+	<header class="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+		<div>
+			<h1 class="text-3xl font-bold tracking-tight">{$t('doctorBreaks.heading')}</h1>
+			<p class="mt-2 text-sm text-muted-foreground">{$t('doctorBreaks.subtitle')}</p>
 		</div>
-	</div>
-
-	<!-- ── Master Schedule Collapsible Section ──────────────────────────────── -->
-	<div class="pt-2">
-		<button
-			type="button"
-			class="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-			onclick={() => showAllBreaks = !showAllBreaks}
-		>
-			<svg
-				class={cn('size-3.5 transition-transform', showAllBreaks ? 'rotate-90' : '')}
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-			>
-				<polyline points="9 18 15 12 9 6" />
-			</svg>
-			<span>
-				{showAllBreaks ? $t('doctorBreaks.hideAllBreaks') : $t('doctorBreaks.showAllBreaks')} ({breaks.length})
-			</span>
-		</button>
-
-		{#if showAllBreaks}
-			<div class="mt-3 p-4 rounded-xl border bg-card shadow-sm space-y-3">
-				<div class="font-semibold text-sm text-foreground">
-					{$t('doctorBreaks.allBreaksTitle')}
-				</div>
-
-				{#if breaks.length === 0}
-					<div class="text-xs text-muted-foreground py-2">
-						{$t('doctorBreaks.allBreaksEmpty')}
-					</div>
-				{:else}
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-						{#each breaks as b (b.id)}
-							<div class="flex items-center justify-between p-2.5 rounded-lg border bg-muted/20 text-xs">
-								<div class="space-y-0.5">
-									<div class="font-mono font-semibold text-foreground">
-										{b.start_time} — {b.end_time}
-										<span class="font-normal font-sans text-muted-foreground">({b.title})</span>
-									</div>
-									<div class="text-[11px] text-muted-foreground">
-										{#if b.kind === 'weekly'}
-											{$t('doctorBreaks.badgeWeekly', { day: $t(`doctorBreaks.day.${b.day_of_week}`) })}
-										{:else}
-											{$t('doctorBreaks.badgeDate', { date: b.date || '' })}
-										{/if}
-									</div>
-								</div>
-								<Button
-									variant="ghost"
-									size="icon"
-									class="size-7 text-muted-foreground hover:text-destructive"
-									onclick={() => confirmDelete(b)}
-									title="Удалить"
-								>
-									<svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-										<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-										<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-									</svg>
-								</Button>
-							</div>
+		{#if selectedDoctor}
+			<div class="min-w-0 space-y-1.5 sm:w-64 sm:shrink-0">
+				{#if doctors.length > 1}
+					<label for="break-specialist" class="block text-sm font-medium">{$t('doctorBreaks.selectDoctor')}</label>
+					<select id="break-specialist"
+						class="h-11 w-full rounded-lg border bg-card px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring"
+						value={selectedDoctorId} disabled={busy}
+						onchange={(event) => selectDoctor(event.currentTarget.value)}>
+						{#each doctors as doctor (doctor.id)}
+							<option value={doctor.id}>{doctor.name || doctor.email}</option>
 						{/each}
+					</select>
+				{:else}
+					<div class="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5 text-sm font-medium">
+						<UserRound class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+						<span class="wrap-break-word min-w-0">{selectedDoctor.name || selectedDoctor.email}</span>
 					</div>
 				{/if}
 			</div>
 		{/if}
-	</div>
+	</header>
+
+	{#if doctorsLoading}
+		<p role="status" class="text-sm text-muted-foreground">{$t('common.loading')}</p>
+	{:else if doctorsFailed}
+		<div class="flex flex-wrap items-center gap-3 rounded-xl border p-4">
+			<p role="alert" class="text-sm">{$t('doctorBreaks.doctorsFailed')}</p>
+			<Button variant="outline" onclick={loadDoctors}>{$t('doctorBreaks.retry')}</Button>
+		</div>
+	{:else if !selectedDoctor}
+		<p class="rounded-xl border p-4 text-sm text-muted-foreground">{$t('doctorBreaks.noDoctors')}</p>
+	{:else}
+		{#if needsHours}
+			<div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
+				<p>{$t('doctorBreaks.noHoursSet')}</p>
+				<Button variant="outline" class="h-auto min-h-9 whitespace-normal text-left"
+					disabled={busy} onclick={setStandardWorkingHours}>
+					{$t('doctorBreaks.setStandardHours')}
+				</Button>
+			</div>
+		{/if}
+
+		<div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+			<section aria-labelledby="upcoming-breaks" class="min-w-0 space-y-4">
+				<div class="flex flex-wrap items-start justify-between gap-3">
+					<div>
+						<h2 id="upcoming-breaks" class="text-xl font-semibold">{$t('doctorBreaks.upcoming')}</h2>
+						<p class="mt-1 text-sm text-muted-foreground">{$t('doctorBreaks.upcomingDesc')}</p>
+					</div>
+					<Button href="#add-break" variant="outline" class="h-10 lg:hidden">
+						<Plus aria-hidden="true" /> {$t('doctorBreaks.addBreak')}
+					</Button>
+				</div>
+				{#if breaksLoading}
+					<p role="status" class="rounded-xl border p-5 text-sm text-muted-foreground">{$t('common.loading')}</p>
+				{:else if breaksFailed}
+					<div class="flex flex-wrap items-center gap-3 rounded-xl border p-4">
+						<p role="alert" class="text-sm">{$t('doctorBreaks.loadFailed')}</p>
+						<Button variant="outline" disabled={busy} onclick={loadSchedule}>{$t('doctorBreaks.retry')}</Button>
+					</div>
+				{:else if upcoming.length}
+					{@render dayList(upcoming)}
+				{:else}
+					<div class="flex gap-3 rounded-xl border border-dashed bg-muted/20 p-5">
+						<CalendarDays class="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+						<p class="text-sm text-muted-foreground">{$t('doctorBreaks.upcomingEmpty')}</p>
+					</div>
+				{/if}
+			</section>
+
+			<section id="add-break" aria-labelledby="add-break-title" class="scroll-mt-24 rounded-2xl border bg-card p-5 shadow-sm lg:col-start-2 lg:row-start-1 lg:row-span-2">
+				<h2 id="add-break-title" class="text-xl font-semibold">{$t('doctorBreaks.addBreak')}</h2>
+				<p class="mt-1 text-sm text-muted-foreground">{$t('doctorBreaks.addBreakDesc')}</p>
+				<form onsubmit={saveBreak} class="mt-5 space-y-4">
+					<div class="space-y-1.5">
+						<label for="break-date" class="block text-sm font-medium">{$t('doctorBreaks.date')}</label>
+						<Input id="break-date" type="date" bind:value={selectedDate} min={todayIso} required
+							disabled={busy} class="h-11" />
+					</div>
+					<div class="grid grid-cols-2 gap-3">
+						<div class="min-w-0 space-y-1.5">
+							<label for="break-start" class="block text-sm font-medium">{$t('doctorBreaks.timeFrom')}</label>
+							<Input id="break-start" type="time" bind:value={startTime} required disabled={busy} class="h-11" />
+						</div>
+						<div class="min-w-0 space-y-1.5">
+							<label for="break-end" class="block text-sm font-medium">{$t('doctorBreaks.timeTo')}</label>
+							<Input id="break-end" type="time" bind:value={endTime} required disabled={busy} class="h-11" />
+						</div>
+					</div>
+					<p class="text-xs text-muted-foreground">{$t('doctorBreaks.timezone', { timezone })}</p>
+					<div class="space-y-1.5">
+						<label for="break-title" class="block text-sm font-medium">{$t('doctorBreaks.titleLabel')}</label>
+						<Input id="break-title" type="text" bind:value={breakTitle}
+							placeholder={$t('doctorBreaks.titlePlaceholder')} disabled={busy} class="h-11" />
+					</div>
+					{#if formError}
+						<p role="alert" class="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{formError}</p>
+					{/if}
+					<Button type="submit" class="h-11 w-full" disabled={busy || breaksLoading || breaksFailed}>
+						<Plus aria-hidden="true" /> {saving ? $t('doctorBreaks.submitting') : $t('doctorBreaks.submit')}
+					</Button>
+				</form>
+			</section>
+
+			{#if !breaksLoading && !breaksFailed && (recurring.length || past.length)}
+				<div class="space-y-6 lg:col-start-1">
+					{#if recurring.length}
+						<section aria-labelledby="recurring-breaks" class="space-y-3">
+							<h2 id="recurring-breaks" class="text-lg font-semibold">{$t('doctorBreaks.recurring')}</h2>
+							<p class="text-sm text-muted-foreground">{$t('doctorBreaks.recurringDesc')}</p>
+							<ul class="divide-y rounded-xl border bg-card">
+								{#each recurring as item (item.id)}
+									{@render breakRow(item)}
+								{/each}
+							</ul>
+						</section>
+					{/if}
+					{#if past.length}
+						<section aria-labelledby="past-breaks" class="space-y-3">
+							<h2 id="past-breaks" class="text-lg font-semibold">{$t('doctorBreaks.past')}</h2>
+							{@render dayList(past)}
+						</section>
+					{/if}
+				</div>
+			{/if}
+		</div>
+	{/if}
 </div>
 
-<!-- ── Delete Confirmation Dialog ─────────────────────────────────────────── -->
 <ConfirmDialog
 	bind:open={deleteOpen}
 	title={$t('doctorBreaks.deleteConfirmTitle')}
-	description={$t('doctorBreaks.deleteConfirmDesc')}
+	description={deleteTarget ? $t('doctorBreaks.deleteConfirmDesc', {
+		title: deleteTarget.title,
+		date: deleteTarget.date ? formatDate(deleteTarget.date) : $t(`doctorBreaks.day.${deleteTarget.day_of_week}`),
+		start: deleteTarget.start_time,
+		end: deleteTarget.end_time
+	}) : ''}
 	confirmText={$t('common.delete')}
-	destructive={true}
-	onConfirm={doDelete}
+	destructive
+	onConfirm={deleteBreak}
 />
