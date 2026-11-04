@@ -1,14 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { CalendarDays, Clock, Plus, Repeat, UserRound } from '@lucide/svelte';
-	import { getLocalTimeZone, parseDate, today } from '@internationalized/date';
+	import { CalendarDays, ChevronDown, Clock, Plus, Repeat, UserRound } from '@lucide/svelte';
+	import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date';
 	import { toast } from 'svelte-sonner';
 	import { api, type AvailabilityRule, type DoctorBreak, type TeamMember } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { t, localeTag } from '$lib/i18n';
-	import { Button } from '$lib/components/ui/button';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
+	import { Calendar } from '$lib/components/ui/calendar';
 	import { Input } from '$lib/components/ui/input';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
+	import * as Popover from '$lib/components/ui/popover';
+	import BreakTimePicker from './break-time-picker.svelte';
 
 	let doctors = $state<Pick<TeamMember, 'id' | 'name' | 'email' | 'timezone'>[]>([]);
 	let selectedDoctorId = $state('');
@@ -21,6 +24,7 @@
 	let loadVersion = 0;
 
 	let selectedDate = $state('');
+	let dateOpen = $state(false);
 	let startTime = $state('13:00');
 	let endTime = $state('14:00');
 	let breakTitle = $state('');
@@ -34,7 +38,8 @@
 	const busy = $derived(saving || settingHours || deleting || deleteOpen);
 	const selectedDoctor = $derived(doctors.find((doctor) => doctor.id === selectedDoctorId));
 	const timezone = $derived(selectedDoctor?.timezone || getLocalTimeZone());
-	const todayIso = $derived(today(timezone).toString());
+	const earliestDate = $derived(today(timezone));
+	const todayIso = $derived(earliestDate.toString());
 	const scheduledDays = $derived.by(() => {
 		const days = new Map<string, DoctorBreak[]>();
 		const dated = breaks.filter((item) => item.kind === 'date' && item.date);
@@ -57,6 +62,12 @@
 		return parseDate(date).toDate('UTC').toLocaleDateString($localeTag, {
 			weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
 		});
+	}
+
+	function pickDate(date: DateValue | undefined) {
+		if (!date) return;
+		selectedDate = date.toString();
+		dateOpen = false;
 	}
 
 	onMount(() => { void loadDoctors(); });
@@ -231,11 +242,8 @@
 {/snippet}
 
 <div class="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-9">
-	<header class="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
-		<div>
-			<h1 class="text-3xl font-bold tracking-tight">{$t('doctorBreaks.heading')}</h1>
-			<p class="mt-2 text-sm text-muted-foreground">{$t('doctorBreaks.subtitle')}</p>
-		</div>
+	<header class="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+		<h1 class="text-3xl font-bold tracking-tight">{$t('doctorBreaks.heading')}</h1>
 		{#if selectedDoctor}
 			<div class="min-w-0 space-y-1.5 sm:w-64 sm:shrink-0">
 				{#if doctors.length > 1}
@@ -312,17 +320,36 @@
 				<form onsubmit={saveBreak} class="mt-5 space-y-4">
 					<div class="space-y-1.5">
 						<label for="break-date" class="block text-sm font-medium">{$t('doctorBreaks.date')}</label>
-						<Input id="break-date" type="date" bind:value={selectedDate} min={todayIso} required
-							disabled={busy} class="h-11" />
+						<Popover.Root bind:open={dateOpen}>
+							<Popover.Trigger id="break-date" disabled={busy} aria-labelledby="break-date-label break-date-value"
+								class={buttonVariants({ variant: 'outline', class: 'h-11 w-full justify-start gap-2 px-3 font-normal' })}>
+								<span id="break-date-label" class="sr-only">{$t('doctorBreaks.date')}</span>
+								<CalendarDays class="size-4 text-muted-foreground" aria-hidden="true" />
+								<span id="break-date-value" class="truncate capitalize">{formatDate(selectedDate)}</span>
+								<ChevronDown class="ml-auto size-4 text-muted-foreground" aria-hidden="true" />
+							</Popover.Trigger>
+							<Popover.Content align="start" sideOffset={8} role="dialog" aria-label={$t('doctorBreaks.date')}
+								class="max-h-(--bits-popover-content-available-height) w-fit overflow-y-auto rounded-xl p-0 shadow-lg">
+								<Calendar value={parseDate(selectedDate)} minValue={earliestDate} preventDeselect
+									onValueChange={pickDate} locale={$localeTag} weekdayFormat="short" calendarLabel={$t('doctorBreaks.date')}
+									class="px-4 [&_[data-calendar-head-cell]]:w-9 [&_[data-calendar-cell]]:size-9 [&_[data-calendar-day]]:size-9" />
+								<div class="grid grid-cols-2 gap-2 border-t bg-muted/30 p-3">
+									<Button variant="outline" class="h-9" onclick={() => pickDate(earliestDate)}>
+										{$t('doctorBreaks.today')}
+									</Button>
+									<Button variant="outline" class="h-9" onclick={() => pickDate(earliestDate.add({ days: 1 }))}>
+										{$t('doctorBreaks.tomorrow')}
+									</Button>
+								</div>
+							</Popover.Content>
+						</Popover.Root>
 					</div>
 					<div class="grid grid-cols-2 gap-3">
 						<div class="min-w-0 space-y-1.5">
-							<label for="break-start" class="block text-sm font-medium">{$t('doctorBreaks.timeFrom')}</label>
-							<Input id="break-start" type="time" bind:value={startTime} required disabled={busy} class="h-11" />
+							<BreakTimePicker id="break-start" label={$t('doctorBreaks.timeFrom')} bind:value={startTime} disabled={busy} />
 						</div>
 						<div class="min-w-0 space-y-1.5">
-							<label for="break-end" class="block text-sm font-medium">{$t('doctorBreaks.timeTo')}</label>
-							<Input id="break-end" type="time" bind:value={endTime} required disabled={busy} class="h-11" />
+							<BreakTimePicker id="break-end" label={$t('doctorBreaks.timeTo')} bind:value={endTime} disabled={busy} />
 						</div>
 					</div>
 					<p class="text-xs text-muted-foreground">{$t('doctorBreaks.timezone', { timezone })}</p>
