@@ -63,19 +63,28 @@
 				</div>
 			</fieldset>
 
-			<div>
-				<label for={`${id}-minute`} class="mb-2 block text-xs font-medium text-muted-foreground">
-					{$t('doctorBreaks.minutes')}
-				</label>
-				<div class="grid grid-cols-5 gap-1">
+			<div class="space-y-2">
+				<div class="flex items-center justify-between gap-3">
+					<div>
+						<label for={`${id}-minute`} class="block text-sm font-medium">
+							{$t('doctorBreaks.enterMinutes')}
+						</label>
+						<p id={`${id}-minute-hint`} class="text-xs text-muted-foreground">
+							{$t('doctorBreaks.minuteRange')}
+						</p>
+					</div>
+					<Input id={`${id}-minute`} type="text" inputmode="numeric" maxlength={2}
+						bind:value={minute} aria-invalid={!validMinute} aria-describedby={`${id}-minute-hint`}
+						onfocus={(event) => event.currentTarget.select()}
+						class="h-10 w-16 shrink-0 bg-background px-0 text-center tabular-nums" />
+				</div>
+				<div class="grid grid-cols-4 gap-1">
 					{#each quickMinutes as option (option)}
 						<Button variant={minute === option ? 'default' : 'outline'} class="h-9 px-0 tabular-nums"
 							aria-pressed={minute === option} onclick={() => (minute = option)}>
 							:{option}
 						</Button>
 					{/each}
-					<Input id={`${id}-minute`} type="text" inputmode="numeric" maxlength={2}
-						bind:value={minute} aria-invalid={!validMinute} class="h-9 px-0 text-center tabular-nums" />
 				</div>
 			</div>
 
