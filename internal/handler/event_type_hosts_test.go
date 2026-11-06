@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/calnode/calnode/internal/handler"
@@ -52,6 +53,73 @@ func TestEventTypeHosts_ownerSeededAsRequired(t *testing.T) {
 	}
 	if hosts.Items[0].UserID != ownerID || hosts.Items[0].Role != "required" {
 		t.Errorf("seeded host = %+v; want owner as required", hosts.Items[0])
+	}
+}
+
+func TestCreateEventType_withDoctorAndQuestions(t *testing.T) {
+	h, database, key, _ := setupWorkspaceWithDB(t)
+	if _, err := database.Exec(`INSERT INTO users (id,email,name,iana_timezone) VALUES ('doctor','doctor@example.com','Doctor','UTC')`); err != nil {
+		t.Fatal(err)
+	}
+	post := func(hostID string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{
+			"slug":"doctor_20_min","name":"doctor_20_min","duration_minutes":20,
+			"routing_mode":"round_robin","host_user_id":%q,
+			"questions":[
+				{"label":" Reason for visit ","type":"text","required":true},
+				{"label":"Visit type","type":"select","options":["New","Follow-up"]}
+			]
+		}`, hostID)
+		rec := httptest.NewRecorder()
+		h.RequireAuth(h.CreateEventType)(rec, authReq(http.MethodPost, "/v1/event-types", body, key))
+		return rec
+	}
+
+	// A failed host assignment must leave the slug available for a retry.
+	mustStatus(t, post("missing"), http.StatusBadRequest, "create with missing doctor")
+	created := mustCreated(t, post("doctor"), "create with doctor")
+	if created["routing_mode"] != "round_robin" {
+		t.Fatalf("routing mode = %v; want round_robin", created["routing_mode"])
+	}
+	const slug = "doctor_20_min"
+	hosts := getHosts(t, h, slug, key).Items
+	if len(hosts) != 1 || hosts[0].UserID != "doctor" || hosts[0].Role != "rotation" {
+		t.Fatalf("hosts = %+v; want only the doctor in rotation", hosts)
+	}
+
+	mustStatus(t, post("doctor"), http.StatusConflict, "retry an existing slug")
+	req := httptest.NewRequest(http.MethodGet, "/v1/event-types/"+slug+"/questions", nil)
+	req.SetPathValue("slug", slug)
+	rec := httptest.NewRecorder()
+	h.ListQuestions(rec, req)
+	body := mustJSON(t, rec, http.StatusOK, "list public booking questions")
+	questions, ok := body["items"].([]any)
+	if !ok || len(questions) != 2 {
+		t.Fatalf("questions = %v; want two", body["items"])
+	}
+	first := questions[0].(map[string]any)
+	second := questions[1].(map[string]any)
+	if first["label"] != "Reason for visit" || first["required"] != true ||
+		second["label"] != "Visit type" || fmt.Sprint(second["options"]) != "[New Follow-up]" {
+		t.Fatalf("unexpected question contents or order: %v", questions)
+	}
+
+	seedFullAvailabilityDB(t, database, "doctor")
+	bookingBody := fmt.Sprintf(`{
+		"event_type_slug":%q,"start_at":"2026-06-20T10:00:00Z","name":"Patient","email":"patient@example.com",
+		"answers":[{"question_id":%q,"value":"Consultation"}]
+	}`, slug, mustString(t, first, "id", "booking question"))
+	bookingReq := httptest.NewRequest(http.MethodPost, "/v1/bookings", strings.NewReader(bookingBody))
+	bookingReq.Header.Set("Content-Type", "application/json")
+	bookingRec := httptest.NewRecorder()
+	h.CreateBooking(bookingRec, bookingReq)
+	booked := mustCreated(t, bookingRec, "book with selected doctor")
+	var hostID string
+	if err := database.QueryRow(`SELECT host_id FROM bookings WHERE id = ?`, mustString(t, booked, "id", "booking")).Scan(&hostID); err != nil {
+		t.Fatal(err)
+	}
+	if hostID != "doctor" {
+		t.Fatalf("booking assigned to %q; want doctor", hostID)
 	}
 }
 

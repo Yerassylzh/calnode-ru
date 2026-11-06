@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 	import { api, type EventType } from '$lib/api';
 	import { t } from '$lib/i18n';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
@@ -129,14 +130,19 @@
 
 <svelte:head><title>{$t('eventTypes.pageTitle')}</title></svelte:head>
 
-<div class="mb-8 flex items-center justify-between">
+<div class="mb-8 flex flex-wrap items-center justify-between gap-4">
 	<div>
 		<h1 class="text-2xl font-semibold tracking-tight">{$t('eventTypes.title')}</h1>
 		<p class="mt-1 text-sm text-muted-foreground">{$t('eventTypes.subtitle')}</p>
 	</div>
-	<Button onclick={() => { showCreate = !showCreate; }}>
-		{showCreate ? $t('common.cancel') : $t('eventTypes.newEventType')}
-	</Button>
+	<div class="flex flex-wrap gap-2">
+		<Button variant="outline" href={`${base}/event-types/bulk/create`}>
+			{$t('eventTypes.bulk.title')}
+		</Button>
+		<Button onclick={() => { showCreate = !showCreate; }}>
+			{showCreate ? $t('common.cancel') : $t('eventTypes.newEventType')}
+		</Button>
+	</div>
 </div>
 
 {#if showCreate}

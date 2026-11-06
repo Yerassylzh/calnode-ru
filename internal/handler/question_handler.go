@@ -25,6 +25,40 @@ type questionJSON struct {
 	Position    int      `json:"position"`
 }
 
+type questionInput struct {
+	Label    string   `json:"label"`
+	Type     string   `json:"type"`
+	Options  []string `json:"options"`
+	Required bool     `json:"required"`
+}
+
+func (q *questionInput) validate() error {
+	q.Label = strings.TrimSpace(q.Label)
+	q.Type = strings.TrimSpace(q.Type)
+	if q.Label == "" {
+		return errors.New("label is required")
+	}
+	switch q.Type {
+	case "text", "checkbox":
+	case "select":
+		if len(q.Options) == 0 {
+			return errors.New("options is required for type 'select'")
+		}
+	default:
+		return errors.New("type must be one of: text, select, checkbox")
+	}
+	return nil
+}
+
+func (q questionInput) optionsJSON() *string {
+	if q.Type != "select" {
+		return nil
+	}
+	b, _ := json.Marshal(q.Options)
+	s := string(b)
+	return &s
+}
+
 // answerJSON is the API representation of a booking answer.
 type answerJSON struct {
 	QuestionID string `json:"question_id"`
@@ -139,31 +173,15 @@ func (h *Handler) CreateQuestion(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 
 	var req struct {
-		Label    string   `json:"label"`
-		Type     string   `json:"type"`
-		Options  []string `json:"options"`
-		Required bool     `json:"required"`
-		Position *int     `json:"position"`
+		questionInput
+		Position *int `json:"position"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	req.Label = strings.TrimSpace(req.Label)
-	req.Type = strings.TrimSpace(req.Type)
-	if req.Label == "" {
-		h.writeError(w, http.StatusBadRequest, "label is required")
-		return
-	}
-	switch req.Type {
-	case "text", "checkbox":
-	case "select":
-		if len(req.Options) == 0 {
-			h.writeError(w, http.StatusBadRequest, "options is required for type 'select'")
-			return
-		}
-	default:
-		h.writeError(w, http.StatusBadRequest, "type must be one of: text, select, checkbox")
+	if err := req.validate(); err != nil {
+		h.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -181,13 +199,7 @@ func (h *Handler) CreateQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serialise options for select type.
-	var optJSON *string
-	if req.Type == "select" {
-		b, _ := json.Marshal(req.Options)
-		s := string(b)
-		optJSON = &s
-	}
+	optJSON := req.optionsJSON()
 
 	id := uid.New()
 	requiredInt := 0

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -219,25 +220,27 @@ func (h *Handler) CreateEventType(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 
 	var req struct {
-		Slug                 string  `json:"slug"`
-		Name                 string  `json:"name"`
-		DisplayOrder         int     `json:"display_order"`
-		Description          *string `json:"description"`
-		DurationMinutes      int     `json:"duration_minutes"`
-		SlotIntervalMinutes  *int    `json:"slot_interval_minutes"`
-		LocationType         *string `json:"location_type"`
-		LocationValue        *string `json:"location_value"`
-		RoutingMode          *string `json:"routing_mode"`
-		BufferBeforeMinutes  *int    `json:"buffer_before_minutes"`
-		BufferAfterMinutes   *int    `json:"buffer_after_minutes"`
-		MinNoticeMinutes     *int    `json:"min_notice_minutes"`
-		MaxFutureDays        *int    `json:"max_future_days"`
-		MaxActiveBookings    *int    `json:"max_active_bookings"`
-		ContactPolicy        *string `json:"booking_contact_policy"`
-		DefaultContactMethod *string `json:"default_contact_method"`
-		AllowPhoneCall       *bool   `json:"allow_phone_call"`
-		ShowTakenSlots       *bool   `json:"show_taken_slots"`
-		InviteDelivery       *string `json:"invite_delivery"`
+		Slug                 string          `json:"slug"`
+		Name                 string          `json:"name"`
+		DisplayOrder         int             `json:"display_order"`
+		Description          *string         `json:"description"`
+		DurationMinutes      int             `json:"duration_minutes"`
+		SlotIntervalMinutes  *int            `json:"slot_interval_minutes"`
+		LocationType         *string         `json:"location_type"`
+		LocationValue        *string         `json:"location_value"`
+		RoutingMode          *string         `json:"routing_mode"`
+		BufferBeforeMinutes  *int            `json:"buffer_before_minutes"`
+		BufferAfterMinutes   *int            `json:"buffer_after_minutes"`
+		MinNoticeMinutes     *int            `json:"min_notice_minutes"`
+		MaxFutureDays        *int            `json:"max_future_days"`
+		MaxActiveBookings    *int            `json:"max_active_bookings"`
+		ContactPolicy        *string         `json:"booking_contact_policy"`
+		DefaultContactMethod *string         `json:"default_contact_method"`
+		AllowPhoneCall       *bool           `json:"allow_phone_call"`
+		ShowTakenSlots       *bool           `json:"show_taken_slots"`
+		InviteDelivery       *string         `json:"invite_delivery"`
+		HostUserID           *string         `json:"host_user_id"`
+		Questions            []questionInput `json:"questions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -254,6 +257,25 @@ func (h *Handler) CreateEventType(w http.ResponseWriter, r *http.Request) {
 	if req.DurationMinutes <= 0 {
 		h.writeError(w, http.StatusBadRequest, "duration_minutes must be positive")
 		return
+	}
+	hostUserID := user.ID
+	if req.HostUserID != nil {
+		hostUserID = *req.HostUserID
+		if hostUserID == "" {
+			h.writeError(w, http.StatusBadRequest, "host_user_id is required")
+			return
+		}
+		if hostUserID != user.ID {
+			if _, ok := h.requireAdmin(w, r); !ok {
+				return
+			}
+		}
+	}
+	for i := range req.Questions {
+		if err := req.Questions[i].validate(); err != nil {
+			h.writeError(w, http.StatusBadRequest, fmt.Sprintf("question %d: %s", i+1, err))
+			return
+		}
 	}
 
 	// Default the slot interval to the meeting length rather than a fixed 30. The two are
@@ -282,6 +304,9 @@ func (h *Handler) CreateEventType(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	} else if hostUserID != user.ID {
+		// Automatic meeting links need the booking host's connected account.
+		locType = "in_person"
 	} else {
 		locType = h.smartDefaultLocation(r.Context(), user.ID)
 	}
@@ -375,26 +400,49 @@ func (h *Handler) CreateEventType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Seed the owner as the single required host (Normal). Keeps host resolution
-	// uniform — every event type has at least one host from creation.
-	if _, err = tx.ExecContext(r.Context(), `
+	// Preserve the owner-host default for callers that configure hosts separately.
+	hostRole := "required"
+	if req.HostUserID != nil && routingMode == "round_robin" {
+		hostRole = "rotation"
+	}
+	host, err := tx.ExecContext(r.Context(), `
 		INSERT INTO event_type_hosts (id, event_type_id, user_id, role, priority)
-		VALUES (?, ?, ?, 'required', 0)`, uid.New(), id, user.ID); err != nil {
+		SELECT ?, ?, id, ?, 0 FROM users WHERE id = ? AND archived_at IS NULL`,
+		uid.New(), id, hostRole, hostUserID)
+	if err != nil {
 		h.logger.ErrorContext(r.Context(), "create event type: seed host", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-
-	if err = tx.Commit(); err != nil {
-		h.logger.ErrorContext(r.Context(), "create event type: commit", "error", err)
-		h.writeError(w, http.StatusInternalServerError, "internal error")
+	if n, err := host.RowsAffected(); err != nil || n != 1 {
+		if err != nil {
+			h.logger.ErrorContext(r.Context(), "create event type: count inserted hosts", "error", err)
+			h.writeError(w, http.StatusInternalServerError, "internal error")
+		} else {
+			h.writeError(w, http.StatusBadRequest, "host must be an active member")
+		}
 		return
 	}
+	for i, question := range req.Questions {
+		if _, err := tx.ExecContext(r.Context(), `
+			INSERT INTO event_type_questions (id, event_type_id, label, type, options, required, position)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			uid.New(), id, question.Label, question.Type, question.optionsJSON(), question.Required, i); err != nil {
+			h.logger.ErrorContext(r.Context(), "create event type: seed question", "error", err)
+			h.writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	}
 
-	row := h.db.QueryRowContext(r.Context(), selectETCols+" WHERE id = ?", id)
+	row := tx.QueryRowContext(r.Context(), selectETCols+" WHERE id = ?", id)
 	et, err := scanEventType(row)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "fetch created event type", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		h.logger.ErrorContext(r.Context(), "create event type: commit", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
