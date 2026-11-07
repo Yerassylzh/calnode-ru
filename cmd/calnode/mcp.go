@@ -59,7 +59,7 @@ func runMCPStdio(_ []string) {
 	defer drain()
 
 	logger.Info("calnode MCP server ready (stdio transport)")
-	if err := h.MCPServer().Run(ctx, &mcp.StdioTransport{}); err != nil {
+	if err := h.StaffMCPServer().Run(ctx, &mcp.StdioTransport{}); err != nil {
 		logger.Error("mcp: stdio server exited with error", "error", err)
 		os.Exit(1)
 	}

@@ -192,12 +192,12 @@ func (h *Handler) reconcileCreations(ctx context.Context, gc *calendar.Service) 
 	}
 	var items []missing
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT bh.booking_id, bh.user_id, bh.is_primary, et.name, COALESCE(NULLIF(b.location_type, ''), et.location_type),
+		SELECT bh.booking_id, bh.user_id, bh.is_primary, COALESCE(et.name, 'Appointment'), COALESCE(NULLIF(b.location_type, ''), et.location_type, ''),
 		       COALESCE(b.location_value, ''), b.invite_delivery,
 		       COALESCE(o.name, ''), COALESCE(o.email, ''), COALESCE(o.locale, ''), b.start_at, b.end_at
 		FROM booking_hosts bh
 		JOIN bookings b ON b.id = bh.booking_id
-		JOIN event_types et ON et.id = b.event_type_id
+		LEFT JOIN event_types et ON et.id = b.event_type_id
 		LEFT JOIN booking_attendees o ON o.booking_id = b.id AND o.is_organizer = 1
 		WHERE b.status = 'confirmed' AND b.end_at > ? AND b.created_at < ?
 		  AND COALESCE(bh.external_event_id, '') = ''`, now, cutoff)

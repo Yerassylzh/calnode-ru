@@ -19,7 +19,6 @@
 	let user = $state<User | null>(null);
 	const loadingFlag = createAsyncFlag(true);
 	const savingFlag = createAsyncFlag();
-	let handle = $state('');
 	const uploadingFlag = createAsyncFlag();
 	let avatarUrl = $state('');
 	let fileInput = $state<HTMLInputElement | undefined>(undefined);
@@ -77,7 +76,6 @@
 	onMount(() => loadingFlag.run(async () => {
 		user = await api.get<User>('/v1/users/me');
 		name = user.name ?? '';
-		handle = user.handle ?? '';
 		booking_accent = user.booking_accent;
 		timezone = user.timezone;
 		time_format = user.time_format ?? '12h';
@@ -86,11 +84,6 @@
 		avatarUrl = user.avatar_url ?? '';
 	}, $t('settingsProfile.loadError')));
 
-	// Mirrors the normalisation the API applies, so the link we show is the URL that
-	// actually resolves — a handle with spaces or punctuation is rewritten server-side.
-	const handleSlug = $derived(
-		handle.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-	);
 
 	function cancelCrop() {
 		cropOpen = false;
@@ -133,7 +126,7 @@
 	async function save() {
 		await savingFlag.run(async () => {
 			const updated = await api.patch<User>('/v1/users/me', {
-				name, timezone, time_format, week_start, date_format, booking_accent, handle,
+				name, timezone, time_format, week_start, date_format, booking_accent,
 			});
 			currentUser.set(updated);
 			prefs.set(prefsFromUser(updated));
@@ -207,25 +200,6 @@
 					<Label for="name">{$t('settingsProfile.name.label')}</Label>
 					<Input id="name" type="text" bind:value={name} placeholder={$t('settingsProfile.name.placeholder')} />
 					<p class="text-xs text-muted-foreground">{$t('settingsProfile.name.hint')}</p>
-				</div>
-				<div class="space-y-1.5">
-					<Label for="handle">{$t('settingsProfile.handle.label')}</Label>
-					<Input id="handle" type="text" bind:value={handle} placeholder={$t('settingsProfile.handle.placeholder')} />
-					{#if handleSlug}
-						<p class="text-xs text-muted-foreground">
-							{$t('settingsProfile.handle.publicPage')}
-							<a
-								href={`/u/${handleSlug}`}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="font-mono text-primary hover:underline"
-							>
-								/u/{handleSlug}
-							</a>
-						</p>
-					{:else}
-						<p class="text-xs text-muted-foreground">{$t('settingsProfile.handle.emptyHint')}</p>
-					{/if}
 				</div>
 				<div class="space-y-1.5">
 					<Label class="text-muted-foreground">{$t('settingsProfile.email.label')}</Label>

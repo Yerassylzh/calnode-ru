@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,7 +11,7 @@ import (
 
 // RescheduleBooking handles PATCH /v1/bookings/{id}/reschedule (admin or primary host).
 // Body: {"start_at":"<RFC3339>"}
-// end_at is computed from the event type's duration_minutes.
+// The appointment's existing duration is preserved.
 func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromContext(r.Context())
 	id := r.PathValue("id")
@@ -30,20 +29,8 @@ func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "start_at must be RFC3339 (e.g. 2026-06-15T09:00:00Z)")
 		return
 	}
-	if newStart.Before(time.Now()) {
-		h.writeError(w, http.StatusBadRequest, "start_at cannot be in the past")
-		return
-	}
-
-	// Load booking + event type in one query to check ownership and get duration.
-	var hostID, startStr, endStr, status, etSlug, etID string
-	var durMins int
-	err = h.db.QueryRowContext(r.Context(), `
-		SELECT b.host_id, b.start_at, b.end_at, b.status, et.duration_minutes, et.slug, et.id
-		FROM bookings b JOIN event_types et ON et.id = b.event_type_id
-		WHERE b.id = ?`, id).
-		Scan(&hostID, &startStr, &endStr, &status, &durMins, &etSlug, &etID)
-	if errors.Is(err, sql.ErrNoRows) {
+	b, err := h.bookingSvc.Get(r.Context(), id)
+	if errors.Is(err, booking.ErrNotFound) {
 		h.writeError(w, http.StatusNotFound, "booking not found")
 		return
 	}
@@ -53,40 +40,28 @@ func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Return 404 for unauthorized access to avoid leaking booking IDs.
-	if !user.IsAdmin && hostID != user.ID {
+	if !user.IsAdmin && b.HostID != user.ID {
 		h.writeError(w, http.StatusNotFound, "booking not found")
 		return
 	}
-	if status == "cancelled" {
+	if newStart.Before(bookingNow()) {
+		h.writeError(w, http.StatusBadRequest, "start_at cannot be in the past")
+		return
+	}
+	if b.Status == "cancelled" {
 		h.writeError(w, http.StatusConflict, "this booking has been cancelled")
 		return
 	}
 
-	previousStart, err := time.Parse(time.RFC3339Nano, startStr)
-	if err != nil {
-		// Fallback for RFC3339 without nanoseconds.
-		previousStart, err = time.Parse(time.RFC3339, startStr)
-		if err != nil {
-			h.logger.ErrorContext(r.Context(), "reschedule booking: parse start_at", "error", err)
-			h.writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-	}
-	previousEnd, err := time.Parse(time.RFC3339Nano, endStr)
-	if err != nil {
-		previousEnd, err = time.Parse(time.RFC3339, endStr)
-		if err != nil {
-			h.logger.ErrorContext(r.Context(), "reschedule booking: parse end_at", "error", err)
-			h.writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-	}
+	newEnd := newStart.Add(b.EndAt.Sub(b.StartAt))
 
-	newEnd := newStart.Add(time.Duration(durMins) * time.Minute)
-
-	if err := h.validateRescheduleTime(r.Context(), id, etID, hostID, newStart, newEnd); err != nil {
+	if err := h.validateRescheduleTime(r.Context(), id, b.EventTypeID, b.HostID, newStart, newEnd, true); err != nil {
 		if errors.Is(err, errSlotUnavailable) {
 			h.writeError(w, http.StatusConflict, "this slot is no longer available")
+			return
+		}
+		if errors.Is(err, errCalendarUnavailable) {
+			h.writeError(w, http.StatusServiceUnavailable, errCalendarUnavailable.Error())
 			return
 		}
 		h.logger.ErrorContext(r.Context(), "reschedule booking: validate time", "error", err)
@@ -115,9 +90,5 @@ func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 
 	h.writeJSON(w, http.StatusOK, toBookingJSON(updated))
 
-	// Side effects (calendar move, Zoom update, emails, webhook, reminders) are shared
-	// with the manage-token reschedule flow — see rescheduleSideEffects in
-	// manage_handler.go. etSlug is unused here now; it's re-derived inside the helper
-	// via loadCancellationData's own join, which is equivalent.
-	go h.rescheduleSideEffects(*updated, etID, previousStart, previousEnd) // #nosec G118 -- deliberately its own context.Background(); see rescheduleSideEffects' doc comment
+	go h.rescheduleSideEffects(*updated, b.EventTypeID, b.StartAt, b.EndAt) // #nosec G118 -- deliberately its own context.Background(); see rescheduleSideEffects' doc comment
 }

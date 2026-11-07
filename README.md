@@ -83,67 +83,39 @@ and AI-ready** over feature-maximal, Calnode is built for you.
 
 ---
 
-## AI-native
+## Staff scheduling over REST
 
-Everything a human can do, an agent can do — over the API today:
+The weekly calendar and agent integrations use staff working hours and exact appointment times.
+Members can schedule themselves. Admins can pass another staff member's ID, listed by GET /v1/users.
 
 ```bash
-# Find slots and book, with an API key
-curl -s "$BASE/v1/event-types/intro-call/slots?from=2026-06-16&to=2026-06-20&tz=Pacific/Auckland" \
-  -H "Authorization: Bearer $API_KEY"
+curl -sG "$BASE/v1/schedule/availability" -H "Authorization: Bearer $API_KEY" \
+  --data-urlencode "staff_id=$STAFF_ID" --data-urlencode "duration_minutes=20" \
+  --data-urlencode "from=2026-12-07T09:00:00+05:00" \
+  --data-urlencode "to=2026-12-07T18:00:00+05:00"
 
-curl -s -X POST "$BASE/v1/bookings" -H "Authorization: Bearer $API_KEY" \
-  -H 'Idempotency-Key: 9f3c…' -H 'Content-Type: application/json' \
-  -d '{"event_type_slug":"intro-call","start_at":"2026-06-17T21:00:00Z","name":"Alex","email":"alex@example.com","timezone":"Pacific/Auckland"}'
+curl -s "$BASE/v1/schedule/bookings" -H "Authorization: Bearer $API_KEY" \
+  -H 'Idempotency-Key: agent-request-123' -H 'Content-Type: application/json' \
+  -d "{\"staff_id\":\"$STAFF_ID\",\"start_at\":\"2026-12-07T15:30:00+05:00\",\"duration_minutes\":20,\"name\":\"Alex\",\"email\":\"alex@example.com\",\"timezone\":\"Asia/Qyzylorda\"}"
 ```
 
-Wire booking lifecycle events (`booking.created` / `.rescheduled` / `.cancelled`)
-to n8n / Make / your own service with HMAC-signed webhooks — all configured through
-the API, not buried in a UI.
+Availability returns continuous windows with inclusive start_at and exclusive end_at in
+the staff member's timezone. Pass duration_minutes to exclude past time and windows too
+short for the appointment. Choose any start that leaves room for the full appointment.
+Both endpoints default to the authenticated user's staff ID. Date ranges are limited to
+32 days.
 
-**Native MCP server.** A Model Context Protocol server is compiled *into* the binary
-(official Go SDK), exposing eight first-class tools — `list_event_types`,
-`get_event_type`, `get_available_slots`, `create_booking`, `get_booking`,
-`reschedule_booking`, `cancel_booking`, `list_bookings`. The MCP tools call the same internal services as
-the REST API (no parallel code path), so booking side effects — calendar events,
-confirmation emails, webhooks, reminders — fire identically.
+A booking requires a start, a duration in minutes, an attendee name, and an email or
+contact_phone. On a 409 time_unavailable response, refresh availability and offer another
+time. Retry an identical booking request with the same idempotency key. A 503 means a
+connected calendar could not be checked.
 
-Two transports:
-- **stdio** for local agents — run `calnode mcp` (logs to stderr, JSON-RPC on stdout).
-- **Streamable HTTP** at `POST /mcp` for remote agents. Calnode is its own **OAuth 2.1
-  authorization server** (dynamic client registration + PKCE), so an agent adds the
-  server by URL and clicks **Connect** → signs in with the workspace's Google/Microsoft
-  login → approves a consent screen — no pre-shared key. A `cno_` API key also works
-  (`Authorization: Bearer <key>`) for scripts. *(The Connect UX needs HTTPS — it shines
-  on a deployed instance.)*
+Existing appointments and their management links are preserved. New bookings require
+the authenticated staff API. Old public template links and widget booking have been retired.
 
-```
-User:  "Book a 30-min call with Wynne next week — I'm in Auckland."
-Agent: get_available_slots("intro-call", "2026-06-16", "2026-06-20", "Pacific/Auckland")
-       → presents options → create_booking(…) → returns confirmation + meeting link
-```
-
-**Conversational booking — in the booking page itself.** Beyond agents, the booking page
-(and the embed widget) ships an optional **"Book by chat"** assistant: a visitor types
-"free Tuesday afternoon or next week" and it resolves real availability and books — the
-deterministic engine still computes the slots (the model never invents times), and the
-assistant only ever sees free/busy windows, never your calendar contents. **Bring your own
-model** — any OpenAI-compatible endpoint (a hosted model or one you run yourself); off by
-default, with the standard calendar always there as the fallback.
-
-**Connecting Claude (remote / HTTP).** In Claude (claude.ai or Desktop) →
-**Settings → Connectors → Add custom connector** → enter `https://<your-instance>/mcp`
-→ **Connect** → sign in → **Allow**. Custom connectors need a paid Claude plan; the
-server must be on HTTPS. *Local stdio alternative (any plan):* point an MCP client at
-the `calnode mcp` subcommand via its config file — no OAuth, runs against the local DB.
-
-**Permissions.** MCP tools are **role-scoped**, mirroring the rest of the app: an
-**owner/admin** acts across the whole workspace, a **member** sees and manages only
-bookings they host. (The stdio subcommand is the local operator → full access.) Booking
-*creation* and availability are the public booking surface, open to all. Roles are fixed
-(owner / admin / member); configurable RBAC is intentionally out of the lean core.
-
----
+Booking lifecycle webhooks are available for n8n and other integrations. MCP supports
+reading and managing existing bookings over calnode mcp or POST /mcp. Use REST to
+find availability and create new appointments.
 
 ## Deploy for real
 
@@ -162,7 +134,7 @@ docker run -d -p 3000:3000 \
 minor) or an exact `:0.1.0`. See [releases](https://github.com/Calnode/calnode/releases).
 
 Open `/` → it redirects to `/admin/` and walks you through first-run setup (create
-the owner account, connect a calendar, add an event type). Put a TLS-terminating
+the owner account, connect a calendar, set staff working hours). Put a TLS-terminating
 proxy in front that forwards the original `Host` header.
 
 **Full guide → [DEPLOY.md](DEPLOY.md)** (env vars, Railway step-by-step, custom
@@ -185,13 +157,11 @@ domains, Resend email, Google & Microsoft OAuth, Litestream backups, troubleshoo
 - HTML branded email (logo, banner, business name, size/opacity) with add-to-calendar links
 - REST API (88 endpoints) + API keys; **HMAC webhooks** with per-webhook payloads + delivery log
 - **Native MCP server** (10 tools incl. meeting notes + transcript; stdio via `calnode mcp` + Streamable HTTP at `/mcp`)
-- **Conversational booking** ("Book by chat" on the booking page + embed widget; BYO-LLM, off by default)
 - **Paid bookings** — Stripe Checkout (pay-then-book: the slot is held, confirmed on the payment webhook, auto-refunded on cancel)
 - **Zoom** — per-host OAuth; a Zoom-located booking mints a meeting under the assigned host's account
 - **Built-in video meetings (LiveKit)** — in-browser rooms as a booking location (no app or account for guests); host controls (end-for-all, hand-off **and reclaim** host, attendee screen-share toggle), **meeting recording** straight to your own **Litestream backup bucket** (the same one
   you already use for DB backup — no extra storage to provision) with in-app downloads, **recording consent** (notice + consent-or-leave), and an **AI notetaker** (Deepgram transcript → LLM notes). Headless-consumable: MCP `get_meeting_notes`/`get_transcript` + `recording.completed`/`transcript.ready`/`notes.ready` webhooks. BYO LiveKit endpoint (Cloud or self-hosted); configured in Settings → Video — see [docs/VIDEO.md](docs/VIDEO.md)
-- **9 languages** on every booker-facing surface - booking page, manage/reschedule page,
-  embed widget, all four emails, and the calendar invite: **English · Spanish · French ·
+- **9 languages** on booking management pages, emails, and calendar invites: **English · Spanish · French ·
   Canadian French · German · Italian · Portuguese · Dutch · Swedish**. Picked from
   `Accept-Language` with a footer switcher and an operator-set fallback language; the
   booker's choice is stored on the booking, so reminders arrive in the language they

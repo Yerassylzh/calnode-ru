@@ -374,12 +374,18 @@ func (h *Handler) validateBookingTime(ctx context.Context, et *bookableEventType
 // booking.Service.Reschedule's own "every host keeps their seat, so every host must be
 // free" semantics — falls back to the booking's primary host_id for a legacy booking with
 // no booking_hosts rows, the same fallback Reschedule itself uses.
-func (h *Handler) validateRescheduleTime(ctx context.Context, bookingID, eventTypeID, fallbackHostID string, newStart, newEnd time.Time) error {
+func (h *Handler) validateRescheduleTime(ctx context.Context, bookingID, eventTypeID, fallbackHostID string, newStart, newEnd time.Time, checkCalendar bool) error {
+	if eventTypeID == "" {
+		if newStart.Before(bookingNow()) {
+			return errSlotUnavailable
+		}
+		return h.validateStaffTime(ctx, fallbackHostID, newStart, newEnd)
+	}
 	var et bookableEventType
 	et.ID = eventTypeID
 	if err := h.db.QueryRowContext(ctx,
-		`SELECT min_notice_minutes, max_future_days FROM event_types WHERE id = ?`, eventTypeID).
-		Scan(&et.MinNoticeMinutes, &et.MaxFutureDays); err != nil {
+		`SELECT min_notice_minutes, max_future_days, buffer_before_minutes, buffer_after_minutes FROM event_types WHERE id = ?`, eventTypeID).
+		Scan(&et.MinNoticeMinutes, &et.MaxFutureDays, &et.BufferBeforeMinutes, &et.BufferAfterMinutes); err != nil {
 		return fmt.Errorf("load event type constraints: %w", err)
 	}
 
@@ -406,7 +412,11 @@ func (h *Handler) validateRescheduleTime(ctx context.Context, bookingID, eventTy
 	// routingMode "fixed" (i.e. not "round_robin") makes validateBookingTime require EVERY
 	// one of hostIDs to be available — there's no pool to pick from on a reschedule, every
 	// assigned host keeps their seat.
-	return h.validateBookingTime(ctx, &et, "fixed", hostIDs, nil, newStart, newEnd)
+	if err := h.validateBookingTime(ctx, &et, "fixed", hostIDs, nil, newStart, newEnd); err != nil || !checkCalendar {
+		return err
+	}
+	_, _, err = h.calendarFreeHosts(ctx, &et, hostIDs, nil, nil, newStart, newEnd)
+	return err
 }
 
 // filterAvailableHosts narrows a candidate pool to the hosts actually free
@@ -463,7 +473,7 @@ func (h *Handler) hostAvailableAt(ctx context.Context, userID, eventTypeID strin
 		if err != nil {
 			return false, err
 		}
-		for _, w := range windows {
+		for _, w := range slots.SubtractIntervals(windows, nil) {
 			if !startAt.Before(w.Start) && !endAt.After(w.End) {
 				return true, nil
 			}
@@ -647,7 +657,7 @@ type bookingJSON struct {
 	ManageURL          string `json:"manage_url,omitempty"`
 	ContactMethod      string `json:"contact_method,omitempty"`
 	ID                 string `json:"id"`
-	EventTypeID        string `json:"event_type_id"`
+	EventTypeID        string `json:"event_type_id,omitempty"`
 	EventTypeSlug      string `json:"event_type_slug,omitempty"`
 	HostID             string `json:"host_id"`
 	HostName           string `json:"host_name,omitempty"` // set in the admin "All bookings" view
@@ -739,6 +749,14 @@ func (h *Handler) noConnectedDestination(ctx context.Context, hostID string) boo
 // Phase 1: host is always event_type.user_id. Team routing (round_robin,
 // collective with multiple hosts) will be added when team CRUD lands.
 func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
+	h.createBooking(w, r, false)
+}
+
+func (h *Handler) CreateScheduleBooking(w http.ResponseWriter, r *http.Request) {
+	h.createBooking(w, r, true)
+}
+
+func (h *Handler) createBooking(w http.ResponseWriter, r *http.Request, scheduled bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
@@ -750,14 +768,16 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		EventTypeSlug string `json:"event_type_slug"`
-		StartAt       string `json:"start_at"`
-		Name          string `json:"name"`
-		Email         string `json:"email"`
-		Phone         string `json:"phone"`
-		ContactPhone  string `json:"contact_phone"`
-		ContactMethod string `json:"contact_method"`
-		Timezone      string `json:"timezone"`
+		EventTypeSlug   string `json:"event_type_slug"`
+		StaffID         string `json:"staff_id"`
+		DurationMinutes int    `json:"duration_minutes"`
+		StartAt         string `json:"start_at"`
+		Name            string `json:"name"`
+		Email           string `json:"email"`
+		Phone           string `json:"phone"`
+		ContactPhone    string `json:"contact_phone"`
+		ContactMethod   string `json:"contact_method"`
+		Timezone        string `json:"timezone"`
 		// Language is the resolved page locale code (e.g. "es") the client already knows —
 		// sent explicitly rather than re-derived from Accept-Language/cookie server-side,
 		// since the embed widget's cross-origin fetch can't rely on the same-origin
@@ -792,12 +812,27 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	// released on any failure path (via the deferred cleanup below) so a retry
 	// after an error can still proceed. The public booking page does not send a
 	// key, so this path is inert for normal bookings.
+	user, authenticated := userFromContext(r.Context())
+	if scheduled {
+		if !authenticated {
+			h.writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		staffID, ok := h.scheduleStaff(w, user, req.StaffID)
+		if !ok {
+			return
+		}
+		req.StaffID = staffID
+	}
 	idemKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	idemDone := false
 	if idemKey != "" {
 		if len(idemKey) > 255 {
 			h.writeError(w, http.StatusBadRequest, "Idempotency-Key must be at most 255 characters")
 			return
+		}
+		if scheduled {
+			idemKey = "schedule:" + idemHash([]byte(user.ID+"\x00"+idemKey))
 		}
 		reqHash := idemHash(rawBody)
 		rec, replay, err := h.claimIdempotencyKey(r.Context(), idemKey, reqHash)
@@ -836,8 +871,12 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	// are reachable only by a broken client and read as API diagnostics, not UI copy.
 	loc := i18n.Resolve("", req.Language)
 
-	if req.EventTypeSlug == "" || req.StartAt == "" || req.Name == "" {
-		h.writeError(w, http.StatusBadRequest, "event_type_slug, start_at, and name are required")
+	if !scheduled && req.EventTypeSlug == "" {
+		h.writeError(w, http.StatusBadRequest, "event_type_slug is required")
+		return
+	}
+	if req.StartAt == "" || req.Name == "" {
+		h.writeError(w, http.StatusBadRequest, "start_at and name are required")
 		return
 	}
 	// Normalise before anything reads req.Email — the hourly throttle, the Stripe
@@ -856,6 +895,17 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	startAt, err := time.Parse(time.RFC3339, req.StartAt)
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "start_at must be RFC3339 (e.g. 2026-06-15T09:00:00Z)")
+		return
+	}
+
+	if scheduled {
+		if req.EventTypeSlug != "" {
+			h.writeError(w, http.StatusBadRequest, "use duration_minutes instead of event_type_slug")
+			return
+		}
+		organizer.IANATimezone = req.Timezone
+		organizer.Locale = loc.Code
+		idemDone = h.createStaffAppointment(w, r, req.StaffID, startAt.UTC(), req.DurationMinutes, organizer, idemKey)
 		return
 	}
 
@@ -949,7 +999,7 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	b, err := h.bookingSvc.Create(r.Context(), booking.CreateParams{
+	params := booking.CreateParams{
 		EventTypeID:   et.ID,
 		HostIDs:       candidates,
 		RoutingMode:   et.RoutingMode,
@@ -972,7 +1022,8 @@ func (h *Handler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		MaxActivePerInvitee: et.MaxActiveBookings,
 		MaxBookingsPerHour:  maxBookingsPerEmailPerHour,
 		InviteDelivery:      et.InviteDelivery,
-	})
+	}
+	b, err := h.bookingSvc.Create(r.Context(), params)
 	if err != nil {
 		if errors.Is(err, booking.ErrDoubleBooked) {
 			h.writeError(w, http.StatusConflict, "this slot is no longer available")
@@ -2076,10 +2127,11 @@ func (h *Handler) loadCancellationData(ctx context.Context, b *booking.Booking) 
 	// Event type name + slug and the assigned host's name + email. The host
 	// comes from the booking (b.HostID), not the event-type owner: with
 	// multi-host event types the owner rarely hosts the booking (#48).
-	err := h.db.QueryRowContext(ctx, `
+	if b.EventTypeID == "" {
+		d.EventTypeName = "Appointment"
+	} else if err := h.db.QueryRowContext(ctx, `
 		SELECT et.name, et.slug FROM event_types et WHERE et.id = ?`, b.EventTypeID).
-		Scan(&d.EventTypeName, &d.EventTypeSlug)
-	if err != nil {
+		Scan(&d.EventTypeName, &d.EventTypeSlug); err != nil {
 		return d, fmt.Errorf("load event: %w", err)
 	}
 	if err := h.loadHostIntoData(ctx, b.HostID, &d); err != nil {

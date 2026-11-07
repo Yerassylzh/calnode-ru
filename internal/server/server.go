@@ -299,7 +299,7 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 	// agents. One server instance reused across requests. Guarded by a bearer token:
 	// an OAuth access token (the "Connect" flow) or a cno_ API key, both resolved by
 	// verifyMCPBearer. A 401 advertises the OAuth discovery doc so clients can connect.
-	mcpSrv := h.MCPServer()
+	mcpSrv := h.StaffMCPServer()
 	mcpHTTP := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, nil)
 	mcpAuth := auth.RequireBearerToken(h.VerifyMCPBearer, &auth.RequireBearerTokenOptions{
 		ResourceMetadataURL: cfg.BaseURL + "/.well-known/oauth-protected-resource",
@@ -394,17 +394,6 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 	mux.HandleFunc("DELETE /v1/settings/branding/banner", h.RequireAuth(h.DeleteBrandingBanner))
 
 	// Event types
-	mux.HandleFunc("POST /v1/event-types", h.RequireAuth(h.CreateEventType))
-	mux.HandleFunc("GET /v1/event-types", h.RequireAuth(h.ListEventTypes))
-	mux.HandleFunc("GET /v1/event-types/{slug}", h.RequireAuth(h.GetEventType))
-	mux.HandleFunc("PATCH /v1/event-types/{slug}", h.RequireAuth(h.PatchEventType))
-	mux.HandleFunc("DELETE /v1/event-types/{slug}", h.RequireAuth(h.DeleteEventType))
-	mux.HandleFunc("POST /v1/event-types/{slug}/duplicate", h.RequireAuth(h.DuplicateEventType))
-	mux.HandleFunc("POST /v1/event-types/{slug}/transfer", h.RequireAuth(h.TransferEventType))
-	mux.HandleFunc("GET /v1/event-types/{slug}/hosts", h.RequireAuth(h.ListEventTypeHosts))
-	mux.HandleFunc("PUT /v1/event-types/{slug}/hosts", h.RequireAuth(h.SetEventTypeHosts))
-	testEmailRL := RateLimit(10, time.Minute)
-	mux.HandleFunc("POST /v1/event-types/{slug}/test-email", testEmailRL(h.RequireAuth(h.SendTestEmail)))
 
 	// Availability rules
 	mux.HandleFunc("POST /v1/availability-rules", h.RequireAuth(h.CreateAvailabilityRule))
@@ -421,42 +410,20 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 
 	// Doctor breaks
 	mux.HandleFunc("POST /v1/doctor-breaks", h.RequireAuth(h.CreateDoctorBreak))
+	mux.HandleFunc("GET /v1/schedule/availability", h.RequireAuth(h.GetScheduleAvailability))
 	mux.HandleFunc("GET /v1/doctor-breaks", h.RequireAuth(h.ListDoctorBreaks))
 	mux.HandleFunc("DELETE /v1/doctor-breaks/{id}", h.RequireAuth(h.DeleteDoctorBreak))
 
-	// Slots — public, rate-limited per IP. Browsed more than booked (so a higher cap
-	// than booking), but each call fans out Google free/busy per host, so leaving it
-	// cors wraps the public booking endpoints so the embeddable widget can call them
-	// cross-origin from a customer's site. Scoped to these unauthenticated routes
-	// only — admin/auth routes never get CORS. Default (empty allowlist) = any origin.
-	cors := PublicCORS(cfg.EmbedAllowedOrigins)
-
-	// Public event-type display info for the widget (name/duration/location/brand).
-	mux.HandleFunc("GET /v1/event-types/{slug}/public", cors(h.PublicEventType))
-
-	// unthrottled is a CPU + API-quota abuse vector on an openly-public page.
+	// Historical booking-management links still load their original availability.
 	slotsRL := RateLimit(60, time.Minute)
-	mux.HandleFunc("GET /v1/event-types/{slug}/slots", cors(slotsRL(h.GetSlots)))
-
-	// Conversational booking assistant (optional AI; public, anonymous → tighter limit).
-	assistantRL := RateLimit(15, time.Minute)
-	mux.HandleFunc("POST /v1/event-types/{slug}/assistant", cors(assistantRL(h.BookingAssistant)))
-	mux.HandleFunc("OPTIONS /v1/event-types/{slug}/assistant", cors(func(http.ResponseWriter, *http.Request) {}))
-
-	// Intake questions
-	mux.HandleFunc("GET /v1/event-types/{slug}/questions", cors(h.ListQuestions))
-	mux.HandleFunc("GET /v1/event-types/{slug}/questions/admin", h.RequireAuth(h.ListQuestionsAdmin))
-	mux.HandleFunc("POST /v1/event-types/{slug}/questions", h.RequireAuth(h.CreateQuestion))
-	mux.HandleFunc("PATCH /v1/event-types/{slug}/questions/{id}", h.RequireAuth(h.UpdateQuestion))
-	mux.HandleFunc("DELETE /v1/event-types/{slug}/questions/{id}", h.RequireAuth(h.DeleteQuestion))
+	mux.HandleFunc("GET /v1/event-types/{slug}/slots", slotsRL(h.GetSlots))
 
 	bookingRL := RateLimit(20, time.Minute)
 	manageRL := RateLimit(30, time.Minute)
 
-	// Bookings — public create is CORS-enabled for the widget; the JSON body makes it
-	// a non-simple request, so the OPTIONS preflight is handled too.
-	mux.HandleFunc("POST /v1/bookings", cors(bookingRL(h.CreateBooking)))
-	mux.HandleFunc("OPTIONS /v1/bookings", cors(func(http.ResponseWriter, *http.Request) {}))
+	createAppointment := bookingRL(h.RequireAuth(h.CreateScheduleBooking))
+	mux.HandleFunc("POST /v1/bookings", createAppointment)
+	mux.HandleFunc("POST /v1/schedule/bookings", createAppointment)
 	mux.HandleFunc("GET /v1/bookings/{id}", bookingRL(h.GetBooking))
 	mux.HandleFunc("GET /v1/bookings", h.RequireAuth(h.ListBookings))
 	mux.HandleFunc("POST /v1/bookings/{id}/cancel", h.RequireAuth(h.CancelBooking))
@@ -464,12 +431,10 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 	mux.HandleFunc("POST /v1/bookings/{id}/reassign", h.RequireAuth(h.ReassignBooking))
 	mux.HandleFunc("GET /v1/bookings/{id}/answers", h.RequireAuth(h.GetBookingAnswers))
 
-	// Public booking page
-	mux.HandleFunc("GET /embed.js", h.EmbedJS)
 	mux.HandleFunc("GET /booking.css", h.BookingCSS)
-	mux.HandleFunc("GET /book/{slug}", h.BookPage)
-	mux.HandleFunc("GET /u/{handle}", h.PersonPage)
-	mux.HandleFunc("GET /team/{slug}", h.TeamPage)
+	mux.HandleFunc("GET /book/{slug}", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "This booking link has been retired.", http.StatusGone)
+	})
 
 	// Built-in LiveKit video room (public): the page, its vendored assets, and the token
 	// exchange. The signed room token in the join URL is the capability — no auth.
@@ -557,6 +522,9 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 	// config flag.
 	adminSPA := FrameAncestors(cfg.FrameAncestors)(frontend.Handler())
 	mux.Handle("GET /admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
+	mux.Handle("GET /admin/breaks", http.RedirectHandler("/admin/schedule", http.StatusFound))
+	mux.Handle("GET /admin/event-types", http.RedirectHandler("/admin/schedule", http.StatusFound))
+	mux.Handle("GET /admin/event-types/{rest...}", http.RedirectHandler("/admin/schedule", http.StatusFound))
 	mux.Handle("/admin/", http.StripPrefix("/admin", adminSPA))
 
 	// Bare root → admin. The `{$}` anchor matches ONLY the exact path "/", so it

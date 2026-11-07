@@ -120,11 +120,17 @@ func (h *Handler) ManagePage(w http.ResponseWriter, r *http.Request) {
 	var etName, etSlug, locType, locValue string
 	var durMins, maxDays, minNotice int
 	var hostName, accentColor string
+	if b.EventTypeID == "" {
+		etName = "Appointment"
+		durMins = int(b.EndAt.Sub(b.StartAt) / time.Minute)
+	}
 	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT et.name, et.slug, et.duration_minutes, et.max_future_days, et.min_notice_minutes,
-		       et.location_type, COALESCE(et.location_value,''), u.name, u.booking_accent
-		FROM event_types et JOIN users u ON u.id = et.user_id
-		WHERE et.id = ?`, b.EventTypeID).
+		SELECT COALESCE(et.name, ?), COALESCE(et.slug, ''), COALESCE(et.duration_minutes, ?),
+		       COALESCE(et.max_future_days, 0), COALESCE(et.min_notice_minutes, 0),
+		       COALESCE(et.location_type, ''), COALESCE(et.location_value,''), u.name, u.booking_accent
+		FROM bookings b LEFT JOIN event_types et ON et.id = b.event_type_id
+		JOIN users u ON u.id = COALESCE(et.user_id, b.host_id)
+		WHERE b.id = ?`, etName, durMins, b.ID).
 		Scan(&etName, &etSlug, &durMins, &maxDays, &minNotice, &locType, &locValue, &hostName, &accentColor); err != nil {
 		h.logger.ErrorContext(r.Context(), "manage page: load event type", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -256,22 +262,17 @@ func (h *Handler) RescheduleByToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var durMins int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT duration_minutes FROM event_types WHERE id = ?`, b.EventTypeID).
-		Scan(&durMins); err != nil {
-		h.logger.ErrorContext(r.Context(), "reschedule: load duration", "error", err)
-		h.writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
 	previousStart := b.StartAt
 	previousEnd := b.EndAt
-	newEnd := newStart.Add(time.Duration(durMins) * time.Minute)
+	newEnd := newStart.Add(previousEnd.Sub(previousStart))
 
-	if err := h.validateRescheduleTime(r.Context(), b.ID, b.EventTypeID, b.HostID, newStart, newEnd); err != nil {
+	if err := h.validateRescheduleTime(r.Context(), b.ID, b.EventTypeID, b.HostID, newStart, newEnd, false); err != nil {
 		if errors.Is(err, errSlotUnavailable) {
 			h.writeError(w, http.StatusConflict, "that time slot is no longer available")
+			return
+		}
+		if errors.Is(err, errCalendarUnavailable) {
+			h.writeError(w, http.StatusServiceUnavailable, errCalendarUnavailable.Error())
 			return
 		}
 		h.logger.ErrorContext(r.Context(), "reschedule: validate time", "error", err)

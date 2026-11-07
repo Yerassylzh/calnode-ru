@@ -297,9 +297,9 @@ func (s *Service) enrich(ctx context.Context, p BookingPayload) enrichedBooking 
 		return bd
 	}
 	_ = s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(et.name,''), COALESCE(u.name,''), COALESCE(u.email,'')
+		SELECT COALESCE(et.name,'Appointment'), COALESCE(u.name,''), COALESCE(u.email,'')
 		FROM bookings b
-		JOIN event_types et ON et.id = b.event_type_id
+		LEFT JOIN event_types et ON et.id = b.event_type_id
 		JOIN users u ON u.id = b.host_id
 		WHERE b.id = ?`, p.ID).Scan(&bd.eventTypeName, &bd.hostName, &bd.hostEmail)
 

@@ -51,12 +51,14 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	var policy string
-	if err := tx.QueryRowContext(ctx, "SELECT booking_contact_policy FROM event_types WHERE id = ?", p.EventTypeID).Scan(&policy); err != nil {
-		return nil, err
-	}
-	if err := ValidateContactPolicy(policy, p.Organizer.ContactMethod); err != nil {
-		return nil, err
+	if p.EventTypeID != "" {
+		var policy string
+		if err := tx.QueryRowContext(ctx, "SELECT booking_contact_policy FROM event_types WHERE id = ?", p.EventTypeID).Scan(&policy); err != nil {
+			return nil, err
+		}
+		if err := ValidateContactPolicy(policy, p.Organizer.ContactMethod); err != nil {
+			return nil, err
+		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
@@ -173,7 +175,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 		INSERT INTO bookings
 		  (id, event_type_id, host_id, start_at, end_at, status, location_value, location_type,
 		   invite_delivery, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`,
+		VALUES (?, NULLIF(?, ''), ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`,
 		bookingID, p.EventTypeID, chosenHost, startStr, endStr, p.LocationValue, p.LocationType,
 		inviteDelivery, now, now)
 	if err != nil {
@@ -324,7 +326,7 @@ func (s *Service) CancelByID(ctx context.Context, id, reason string) error {
 // bookingColumns is the column list scanBooking expects, in order — shared by every
 // query that loads a full Booking, so a schema change (a column added/removed) is
 // one edit instead of five.
-const bookingColumns = `id, event_type_id, host_id, start_at, end_at, status,
+const bookingColumns = `id, COALESCE(event_type_id, ''), host_id, start_at, end_at, status,
 	       COALESCE(cancellation_reason, ''), COALESCE(location_value, ''),
 	       created_at, updated_at,
 	       payment_status, amount_paid_cents, amount_paid_currency, location_type,
@@ -341,8 +343,8 @@ func hostBusy(ctx context.Context, tx *sql.Tx, hostID, start, end, excludeBookin
 	var n int
 	err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM bookings b
-		JOIN booking_hosts bh ON bh.booking_id = b.id
-		WHERE (bh.user_id = ? OR EXISTS (
+		WHERE (b.host_id = ? OR EXISTS (
+		  SELECT 1 FROM booking_hosts bh WHERE bh.booking_id = b.id AND (bh.user_id = ? OR EXISTS (
             SELECT 1 FROM connection_calendars checked
             JOIN connection_calendars destination
               ON destination.provider = checked.provider
@@ -350,10 +352,66 @@ func hostBusy(ctx context.Context, tx *sql.Tx, hostID, start, end, excludeBookin
              AND destination.calendar_id = checked.calendar_id
             WHERE checked.user_id = ? AND checked.check_conflicts = 1
               AND destination.user_id = bh.user_id AND destination.is_destination = 1
-        )) AND b.status != 'cancelled' AND b.id != ?
+		)))) AND b.status != 'cancelled' AND b.id != ?
 		  AND b.start_at < ? AND b.end_at > ?`,
-		hostID, hostID, excludeBookingID, end, start).Scan(&n)
-	return n > 0, err
+		hostID, hostID, hostID, excludeBookingID, end, start).Scan(&n)
+	if err != nil || n > 0 {
+		return n > 0, err
+	}
+	return hostOnBreak(ctx, tx, hostID, start, end)
+}
+
+// CheckBreakConflict uses the same transaction as the break insertion so a
+// booking and a break cannot both reserve the same staff member's time.
+func CheckBreakConflict(ctx context.Context, tx *sql.Tx, hostID string, start, end time.Time) (bool, error) {
+	return hostBusy(ctx, tx, hostID, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano), "")
+}
+
+func hostOnBreak(ctx context.Context, tx *sql.Tx, hostID, start, end string) (bool, error) {
+	var timezone string
+	if err := tx.QueryRowContext(ctx, `SELECT iana_timezone FROM users WHERE id = ?`, hostID).Scan(&timezone); err != nil {
+		return false, err
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	from, err := time.Parse(time.RFC3339Nano, start)
+	if err != nil {
+		return false, err
+	}
+	to, err := time.Parse(time.RFC3339Nano, end)
+	if err != nil {
+		return false, err
+	}
+	fromDate, toDate := from.In(loc).Format(time.DateOnly), to.In(loc).Format(time.DateOnly)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT COALESCE(date, ''), COALESCE(day_of_week, -1), start_time, end_time
+		FROM doctor_breaks WHERE user_id = ? AND (kind = 'weekly' OR date BETWEEN ? AND ?)`, hostID, fromDate, toDate)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var date, startTime, endTime string
+		var weekday int
+		if err := rows.Scan(&date, &weekday, &startTime, &endTime); err != nil {
+			return false, err
+		}
+		day, _ := time.Parse(time.DateOnly, fromDate)
+		for ; day.Format(time.DateOnly) <= toDate; day = day.AddDate(0, 0, 1) {
+			dayString := day.Format(time.DateOnly)
+			if date != dayString && (date != "" || weekday != int(day.Weekday())) {
+				continue
+			}
+			breakStart, err1 := time.ParseInLocation("2006-01-02 15:04", dayString+" "+startTime, loc)
+			breakEnd, err2 := time.ParseInLocation("2006-01-02 15:04", dayString+" "+endTime, loc)
+			if err1 == nil && err2 == nil && breakStart.Before(to) && breakEnd.After(from) {
+				return true, nil
+			}
+		}
+	}
+	return false, rows.Err()
 }
 
 // Get returns a single booking by ID.

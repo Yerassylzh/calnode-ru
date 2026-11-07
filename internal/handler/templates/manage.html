@@ -176,7 +176,7 @@ body {
     <div id="main-view">
       <p class="scheduled-label">{{call .T "scheduled_for"}}</p>
       <p class="scheduled-time" id="current-time"></p>
-      <button class="btn-primary" id="reschedule-btn">{{call .T "reschedule"}}</button>
+      <button class="btn-primary{{if not .EventTypeSlug}} hidden{{end}}" id="reschedule-btn">{{call .T "reschedule"}}</button>
       <button class="btn-secondary" id="cancel-btn">{{call .T "cancel_booking"}}</button>
     </div>
 

@@ -339,13 +339,13 @@ export type DoctorBreak = {
 async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
 	const res = await fetch(path, {
 		credentials: 'same-origin',
+		...opts,
 		headers: {
 			...(opts.body && typeof opts.body === 'string'
 				? { 'Content-Type': 'application/json' }
 				: {}),
 			...((opts.headers as Record<string, string>) ?? {})
-		},
-		...opts
+		}
 	});
 
 	if (res.status === 401) {
@@ -367,8 +367,8 @@ async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
 export const api = {
 	get: <T>(path: string) => apiFetch<T>(path),
 
-	post: <T>(path: string, body?: unknown) =>
-		apiFetch<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+	post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+		apiFetch<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined, headers }),
 
 	postForm: <T>(path: string, data: FormData) =>
 		apiFetch<T>(path, { method: 'POST', body: data }),

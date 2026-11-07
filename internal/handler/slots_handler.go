@@ -429,9 +429,8 @@ func (h *Handler) loadHostSchedule(ctx context.Context, userID, eventTypeID stri
 		return nil, nil, nil, err
 	}
 
-	rules, overrides, _ = h.applyBreaksToSchedule(ctx, userID, rules, overrides)
-
-	return hostLoc, rules, overrides, nil
+	rules, overrides, err = h.applyBreaksToSchedule(ctx, userID, rules, overrides)
+	return hostLoc, rules, overrides, err
 }
 
 func (h *Handler) hostAvailability(ctx context.Context, userID, eventTypeID string, dateFrom, dateTo time.Time) (slots.HostAvailability, bool, error) {
@@ -453,10 +452,17 @@ func (h *Handler) hostAvailability(ctx context.Context, userID, eventTypeID stri
 	// a multi-host call isn't offered an overlapping slot on another event.
 	busyRows, err := h.db.QueryContext(ctx, `
 		SELECT b.start_at, b.end_at FROM bookings b
-		JOIN booking_hosts bh ON bh.booking_id = b.id
-		WHERE bh.user_id = ? AND b.status != 'cancelled'
-		  AND b.start_at >= ? AND b.start_at < ?`,
-		userID, busyFrom, busyTo)
+		WHERE b.status != 'cancelled' AND b.end_at > ? AND b.start_at < ?
+		  AND (b.host_id = ? OR EXISTS (
+		    SELECT 1 FROM booking_hosts bh WHERE bh.booking_id = b.id AND (
+		      bh.user_id = ? OR EXISTS (
+		        SELECT 1 FROM connection_calendars checked
+		        JOIN connection_calendars destination USING (provider, account_email, calendar_id)
+		        WHERE checked.user_id = ? AND checked.check_conflicts = 1
+		          AND destination.user_id = bh.user_id AND destination.is_destination = 1
+		      )
+		    )
+		  ))`, busyFrom, busyTo, userID, userID, userID)
 	if err != nil {
 		return slots.HostAvailability{}, false, err
 	}
@@ -497,7 +503,7 @@ func (h *Handler) hostAvailability(ctx context.Context, userID, eventTypeID stri
 	// and rejects these slots at commit time).
 	degraded := false
 	if gc := h.getCal(); gc != nil {
-		if gcalBusy, err := gc.FreeBusy(ctx, userID, dateFrom, dateTo.Add(24*time.Hour)); err != nil {
+		if gcalBusy, err := gc.FreeBusy(ctx, userID, dateFrom.Add(-24*time.Hour), dateTo.Add(48*time.Hour)); err != nil {
 			h.logger.ErrorContext(ctx, "slots: gcal freebusy", "error", err, "host", userID)
 			degraded = true
 		} else {

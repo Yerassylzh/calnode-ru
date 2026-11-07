@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/calnode/calnode/internal/booking"
 	"github.com/calnode/calnode/internal/slots"
 	"github.com/calnode/calnode/internal/uid"
 )
@@ -147,14 +149,59 @@ func (h *Handler) CreateDoctorBreak(w http.ResponseWriter, r *http.Request) {
 
 	id := uid.New()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	ctx := r.Context()
+	var timezone string
+	if err := h.db.QueryRowContext(ctx, `SELECT iana_timezone FROM users WHERE id = ? AND archived_at IS NULL`, targetUID).Scan(&timezone); err != nil {
+		h.writeError(w, http.StatusNotFound, "staff member not found")
+		return
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	start, _ := time.ParseInLocation("2006-01-02 15:04", *req.Date+" "+req.StartTime, loc)
+	end, _ := time.ParseInLocation("2006-01-02 15:04", *req.Date+" "+req.EndTime, loc)
+	if !start.Before(end) || start.Format("15:04") != req.StartTime || end.Format("15:04") != req.EndTime {
+		h.writeError(w, http.StatusBadRequest, "invalid break time in the staff member's timezone")
+		return
+	}
+	if _, _, err := h.calendarFreeHosts(ctx, &bookableEventType{}, []string{targetUID}, nil, nil, start, end); err != nil {
+		if errors.Is(err, errSlotUnavailable) {
+			h.writeError(w, http.StatusConflict, "this break overlaps a calendar event")
+		} else {
+			h.writeError(w, http.StatusServiceUnavailable, errCalendarUnavailable.Error())
+		}
+		return
+	}
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "could not save break")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	busy, err := booking.CheckBreakConflict(ctx, tx, targetUID, start, end)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "check break conflict", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "could not check break conflicts")
+		return
+	}
+	if busy {
+		h.writeError(w, http.StatusConflict, "this break overlaps a booking or another break")
+		return
+	}
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO doctor_breaks (id, user_id, kind, day_of_week, date, start_time, end_time, title, created_at)
 		VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
 		id, targetUID, req.Kind, *req.Date, req.StartTime, req.EndTime, title, now)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "create doctor break", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		h.logger.ErrorContext(ctx, "commit break", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "could not save break")
 		return
 	}
 
@@ -207,8 +254,7 @@ func (h *Handler) applyBreaksToSchedule(ctx context.Context, userID string, rule
 		SELECT kind, day_of_week, COALESCE(date, ''), start_time, end_time
 		FROM doctor_breaks WHERE user_id = ?`, userID)
 	if err != nil {
-		// If table doesn't exist yet, return unchanged.
-		return rules, overrides, nil
+		return nil, nil, err
 	}
 	defer rows.Close()
 
@@ -226,7 +272,7 @@ func (h *Handler) applyBreaksToSchedule(ctx context.Context, userID string, rule
 		var rb rawBreak
 		var dow sql.NullInt64
 		if err := rows.Scan(&rb.kind, &dow, &rb.date, &rb.startTime, &rb.endTime); err != nil {
-			continue
+			return nil, nil, err
 		}
 		if dow.Valid {
 			rb.dow = int(dow.Int64)
@@ -236,6 +282,9 @@ func (h *Handler) applyBreaksToSchedule(ctx context.Context, userID string, rule
 		} else {
 			dateBreaks = append(dateBreaks, rb)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
 	}
 
 	if len(weeklyBreaks) == 0 && len(dateBreaks) == 0 {
@@ -281,10 +330,16 @@ func (h *Handler) applyBreaksToSchedule(ctx context.Context, userID string, rule
 
 	for ds, ovList := range overridesByDate {
 		dBreaks := dateBreaksByDate[ds]
+		for _, wb := range weeklyBreaks {
+			if wb.dow == int(ovList[0].Date.Weekday()) {
+				dBreaks = append(dBreaks, wb)
+			}
+		}
 		if len(dBreaks) == 0 {
 			adjustedOverrides = append(adjustedOverrides, ovList...)
 			continue
 		}
+		before := len(adjustedOverrides)
 		for _, ov := range ovList {
 			if !ov.IsAvailable || ov.StartTime == "" || ov.EndTime == "" {
 				adjustedOverrides = append(adjustedOverrides, ov)
@@ -308,6 +363,9 @@ func (h *Handler) applyBreaksToSchedule(ctx context.Context, userID string, rule
 				})
 			}
 		}
+		if len(adjustedOverrides) == before {
+			adjustedOverrides = append(adjustedOverrides, slots.AvailabilityOverride{Date: ovList[0].Date})
+		}
 	}
 
 	// For date breaks on dates with NO existing overrides: synthesize custom hours from weekly rules minus the date break
@@ -326,6 +384,7 @@ func (h *Handler) applyBreaksToSchedule(ctx context.Context, userID string, rule
 				matchingRules = append(matchingRules, r)
 			}
 		}
+		before := len(adjustedOverrides)
 		for _, r := range matchingRules {
 			currentWindows := [][2]string{{r.StartTime, r.EndTime}}
 			for _, db := range dBreaks {
@@ -344,6 +403,9 @@ func (h *Handler) applyBreaksToSchedule(ctx context.Context, userID string, rule
 					EndTime:     w[1],
 				})
 			}
+		}
+		if len(adjustedOverrides) == before {
+			adjustedOverrides = append(adjustedOverrides, slots.AvailabilityOverride{Date: d})
 		}
 	}
 

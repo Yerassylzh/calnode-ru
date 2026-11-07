@@ -28,10 +28,10 @@ func (h *Handler) ListUserUpcomingBookings(w http.ResponseWriter, r *http.Reques
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT b.id, b.start_at, b.end_at, et.name, et.slug,
+		SELECT b.id, b.start_at, b.end_at, COALESCE(et.name, 'Appointment'), COALESCE(et.slug, ''),
 		       COALESCE(a.name,''), COALESCE(a.email,''), COALESCE(a.phone,''), COALESCE(a.contact_method,'email')
 		FROM bookings b
-		JOIN event_types et ON et.id = b.event_type_id
+		LEFT JOIN event_types et ON et.id = b.event_type_id
 		LEFT JOIN booking_attendees a ON a.booking_id = b.id AND a.is_organizer = 1
 		WHERE b.host_id = ? AND b.status != 'cancelled' AND b.end_at > ?
 		ORDER BY b.start_at ASC`, hostID, now)
@@ -101,15 +101,17 @@ func (h *Handler) ReassignBooking(w http.ResponseWriter, r *http.Request) {
 
 	// Capture the old host + calendar event + summary fields before the move.
 	var oldHostID, extEventID, extProvider, etName, orgName, orgEmail, orgLocale string
+	var native bool
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT b.host_id, COALESCE(b.external_event_id,''), COALESCE(bh.external_provider,''),
-		       et.name, COALESCE(a.name,''), COALESCE(a.email,''), COALESCE(a.locale,'')
+		       COALESCE(et.name, 'Appointment'), COALESCE(a.name,''), COALESCE(a.email,''), COALESCE(a.locale,''),
+		       b.event_type_id IS NULL
 		FROM bookings b
-		JOIN event_types et ON et.id = b.event_type_id
+		LEFT JOIN event_types et ON et.id = b.event_type_id
 		LEFT JOIN booking_attendees a ON a.booking_id = b.id AND a.is_organizer = 1
 		LEFT JOIN booking_hosts bh ON bh.booking_id = b.id AND bh.user_id = b.host_id
 		WHERE b.id = ?`, id).
-		Scan(&oldHostID, &extEventID, &extProvider, &etName, &orgName, &orgEmail, &orgLocale)
+		Scan(&oldHostID, &extEventID, &extProvider, &etName, &orgName, &orgEmail, &orgLocale, &native)
 	if errors.Is(err, sql.ErrNoRows) {
 		h.writeError(w, http.StatusNotFound, "booking not found")
 		return
@@ -120,6 +122,25 @@ func (h *Handler) ReassignBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if native && oldHostID != req.HostID {
+		ctx := r.Context()
+		b, err := h.bookingSvc.Get(ctx, id)
+		if err == nil {
+			err = h.validateStaffTime(ctx, req.HostID, b.StartAt, b.EndAt)
+		}
+		switch {
+		case errors.Is(err, errSlotUnavailable):
+			h.writeError(w, http.StatusConflict, "the chosen staff member is unavailable")
+			return
+		case errors.Is(err, errCalendarUnavailable):
+			h.writeError(w, http.StatusServiceUnavailable, errCalendarUnavailable.Error())
+			return
+		case err != nil:
+			h.logger.ErrorContext(ctx, "reassign: check staff availability", "error", err)
+			h.writeError(w, http.StatusInternalServerError, "could not check staff availability")
+			return
+		}
+	}
 	updated, err := h.bookingSvc.ReassignHost(r.Context(), id, req.HostID)
 	if errors.Is(err, booking.ErrDoubleBooked) {
 		h.writeError(w, http.StatusConflict, "the chosen host already has a booking at that time")

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
+	import { currentUser } from '$lib/stores';
 	import { api, type AvailabilityRule, type AvailabilityOverride } from '$lib/api';
 	import { prefs, fmtDate } from '$lib/prefs';
 	import { t } from '$lib/i18n';
@@ -9,6 +11,10 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Select from '$lib/components/ui/select';
 	import { DatePicker } from '$lib/components/ui/date-picker';
+
+	const staffID = $derived(($currentUser?.is_admin && $page.url.searchParams.get('staff_id')) || $currentUser?.id || '');
+	const staffQuery = $derived('?' + new URLSearchParams({ user_id: staffID }));
+	let staffName = $state('');
 
 	const TIME_SLOTS: string[] = [];
 	for (let h = 0; h < 24; h++) {
@@ -47,9 +53,10 @@
 		rulesError = '';
 		rulesLoading = true;
 		try {
-			const res = await api.get<{ items: AvailabilityRule[] }>('/v1/availability-rules');
+			const res = await api.get<{ items: AvailabilityRule[] }>('/v1/availability-rules' + staffQuery);
 			for (const day of days) { day.blocks = []; day.error = ''; }
 			for (const r of (res.items ?? [])) {
+				if (r.event_type_id) continue;
 				const day = days[r.day_of_week];
 				if (day) day.blocks.push({ id: r.id, start_time: r.start_time, end_time: r.end_time, saving: false, error: '' });
 			}
@@ -71,6 +78,7 @@
 		const block = day.blocks[day.blocks.length - 1];
 		try {
 			const r = await api.post<AvailabilityRule>('/v1/availability-rules', {
+				user_id: staffID,
 				day_of_week: day.day_of_week,
 				start_time: '09:00',
 				end_time: '17:00'
@@ -170,7 +178,7 @@
 	async function loadOverrides() {
 		overridesError = '';
 		try {
-			const res = await api.get<{ items: AvailabilityOverride[] }>('/v1/availability-overrides');
+			const res = await api.get<{ items: AvailabilityOverride[] }>('/v1/availability-overrides' + staffQuery);
 			overrides = (res.items ?? []).sort((a, b) => a.date.localeCompare(b.date));
 		} catch (e: any) {
 			overridesError = e.message;
@@ -221,6 +229,7 @@
 		try {
 			const isRange = ovForm.reason !== 'custom_hours' && !!ovForm.end_date && ovForm.end_date > ovForm.date;
 			await api.post('/v1/availability-overrides', {
+				user_id: staffID,
 				date: ovForm.date,
 				reason: ovForm.reason,
 				...(ovForm.reason === 'custom_hours'
@@ -268,6 +277,14 @@
 	onMount(() => {
 		loadRules();
 		loadOverrides();
+		if (staffID === $currentUser?.id) {
+			staffName = $currentUser.name;
+		} else if ($currentUser?.is_admin) {
+			api.get<{ id: string; name: string; email: string }[]>('/v1/users').then((members) => {
+				const member = members.find((item) => item.id === staffID);
+				staffName = member?.name || member?.email || '';
+			}).catch(() => {});
+		}
 	});
 
 	const REASON_OPTIONS: OverrideReason[] = ['day_off', 'out_of_office', 'custom_hours'];
@@ -299,7 +316,7 @@
 
 <div class="mb-8">
 	<h1 class="text-2xl font-semibold tracking-tight">{$t('availability.heading')}</h1>
-	<p class="mt-1 text-sm text-muted-foreground">{$t('availability.subtitle')}</p>
+	{#if staffName}<p class="mt-1 text-sm text-muted-foreground">{staffName}</p>{/if}
 </div>
 
 <!-- Weekly Hours -->

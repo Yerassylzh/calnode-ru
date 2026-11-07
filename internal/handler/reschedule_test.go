@@ -336,8 +336,8 @@ func TestRescheduleBooking_pastDate(t *testing.T) {
 	slug, _ := seedEventTypeHTTP(t, h, key)
 	bookingID := createBookingViaHTTP(t, h, slug, futureAt(10, 10, 0).Format(time.RFC3339))
 
-	yesterday := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
-	rec := patchReschedule(t, h, bookingID, yesterday, key)
+	past := "2026-05-31T10:00:00Z" // Before the test suite’s pinned booking clock.
+	rec := patchReschedule(t, h, bookingID, past, key)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("past date: got %d; want 400", rec.Code)
 	}

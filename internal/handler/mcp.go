@@ -80,6 +80,12 @@ func (h *Handler) MCPServer() *mcp.Server {
 	return s
 }
 
+func (h *Handler) StaffMCPServer() *mcp.Server {
+	s := h.MCPServer()
+	s.RemoveTools("list_event_types", "get_event_type", "get_available_slots", "create_booking")
+	return s
+}
+
 // ── list_event_types ─────────────────────────────────────────────────────────
 
 type listEventTypesIn struct{}
@@ -458,12 +464,8 @@ func (h *Handler) mcpRescheduleBooking(ctx context.Context, _ *mcp.CallToolReque
 	if userID, fullAccess := mcpCallerScope(ctx); !fullAccess && b.HostID != userID {
 		return nil, bookingJSON{}, fmt.Errorf("booking not found: %s", in.BookingID)
 	}
-	var durMins int
-	if err := h.db.QueryRowContext(ctx, `SELECT duration_minutes FROM event_types WHERE id = ?`, b.EventTypeID).Scan(&durMins); err != nil {
-		return nil, bookingJSON{}, fmt.Errorf("load duration: %w", err)
-	}
-	newEnd := newStart.Add(time.Duration(durMins) * time.Minute)
-	if err := h.validateRescheduleTime(ctx, b.ID, b.EventTypeID, b.HostID, newStart, newEnd); err != nil {
+	newEnd := newStart.Add(b.EndAt.Sub(b.StartAt))
+	if err := h.validateRescheduleTime(ctx, b.ID, b.EventTypeID, b.HostID, newStart, newEnd, false); err != nil {
 		if errors.Is(err, errSlotUnavailable) {
 			return nil, bookingJSON{}, fmt.Errorf("that time slot is no longer available")
 		}

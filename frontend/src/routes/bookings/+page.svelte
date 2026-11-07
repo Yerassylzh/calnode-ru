@@ -2,13 +2,14 @@
 	import { onMount } from 'svelte';
 	import { api, type Booking } from '$lib/api';
 	import { currentUser } from '$lib/stores';
-	import { prefs, fmtDateTime, fmtTime } from '$lib/prefs';
+	import { prefs, fmtDateTime } from '$lib/prefs';
 	import { t } from '$lib/i18n';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Select from '$lib/components/ui/select';
-	import { DatePicker } from '$lib/components/ui/date-picker';
+	import { Input } from '$lib/components/ui/input';
+	import { parseDateTime, toZoned } from '@internationalized/date';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
 
 	let items: Booking[] = $state([]);
@@ -25,7 +26,6 @@
 	// the page got slower with every booking ever made, and the server did unbounded
 	// work to render 25 rows.
 	let timeFilter = $state<'upcoming' | 'past'>('upcoming');
-	let fEventType = $state('');
 	let fHost = $state('');
 	let fTeam = $state('');
 	let fStatus = $state('');
@@ -36,24 +36,15 @@
 	let counts = $state({ upcoming: 0, past: 0 });
 
 	// Options for the filter selects, fetched once.
-	let eventTypes = $state<{ slug: string; name: string }[]>([]);
 	let members = $state<{ id: string; name: string }[]>([]);
 	let teams = $state<{ id: string; name: string }[]>([]);
 
-	const hasFilters = $derived(!!(fEventType || fHost || fTeam || fStatus));
+	const hasFilters = $derived(!!(fHost || fTeam || fStatus));
 	const pageStart = $derived(total === 0 ? 0 : offset + 1);
 	const pageEnd = $derived(Math.min(offset + items.length, total));
-	const eventTypeName = $derived(
-		(slug: string) => eventTypes.find((e) => e.slug === slug)?.name ?? slug
-	);
-
 	let reschedulingId = $state<string | null>(null);
-	let reschedulingSlug = $state('');
 	let rescheduleDate = $state('');
-	let slots: { start: string; end: string }[] = $state([]);
-	let slotsLoading = $state(false);
-	let slotsError = $state('');
-	let selectedSlot = $state('');
+	let rescheduleTime = $state('');
 	let rescheduling = $state(false);
 	let rescheduleError = $state('');
 
@@ -86,7 +77,6 @@
 		// Past reads most-recent-first, upcoming soonest-first. Server-side now: sorting
 		// a page in the browser would only ever sort that page.
 		p.set('order', timeFilter === 'past' ? 'desc' : 'asc');
-		if (fEventType) p.set('event_type', fEventType);
 		if (fHost) p.set('host', fHost);
 		if (fTeam) p.set('team', fTeam);
 		if (fStatus) p.set('status', fStatus);
@@ -154,7 +144,7 @@
 	}
 
 	function clearFilters() {
-		fEventType = fHost = fTeam = fStatus = '';
+		fHost = fTeam = fStatus = '';
 		reload();
 	}
 
@@ -167,10 +157,6 @@
 	// Filter options. Failures are silent: a missing dropdown is a smaller problem than
 	// an error banner over a working table, and members can't list users anyway.
 	async function loadFilterOptions() {
-		try {
-			const res = await api.get<{ items: { slug: string; name: string }[] }>('/v1/event-types');
-			eventTypes = res.items ?? [];
-		} catch { /* leave the dropdown empty */ }
 		if (!isAdmin) return;
 		try {
 			// /v1/users returns a bare array, not an { items } envelope like the others.
@@ -222,47 +208,21 @@
 
 	function startReschedule(b: Booking) {
 		reschedulingId = b.id;
-		reschedulingSlug = b.event_type_slug ?? '';
 		rescheduleDate = '';
-		slots = [];
-		selectedSlot = '';
+		rescheduleTime = '';
 		rescheduleError = '';
-		slotsError = '';
 	}
 
 	function cancelReschedule() {
 		reschedulingId = null;
 	}
 
-	$effect(() => {
-		if (rescheduleDate) loadSlots();
-	});
-
-	async function loadSlots() {
-		if (!rescheduleDate) return;
-		slotsLoading = true;
-		slotsError = '';
-		slots = [];
-		selectedSlot = '';
-		try {
-			const tz = $prefs.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-			const res = await api.get<{ slots: { start: string; end: string }[] }>(
-				`/v1/event-types/${reschedulingSlug}/slots?from=${rescheduleDate}&to=${rescheduleDate}&tz=${encodeURIComponent(tz)}`
-			);
-			slots = res.slots ?? [];
-		} catch (e: any) {
-			slotsError = e.message;
-		} finally {
-			slotsLoading = false;
-		}
-	}
-
 	async function confirmReschedule() {
-		if (!selectedSlot || !reschedulingId) return;
+		if (!rescheduleDate || !rescheduleTime || !reschedulingId) return;
 		rescheduling = true;
 		rescheduleError = '';
 		try {
-			await api.patch(`/v1/bookings/${reschedulingId}/reschedule`, { start_at: selectedSlot });
+			await api.patch(`/v1/bookings/${reschedulingId}/reschedule`, { start_at: toZoned(parseDateTime(rescheduleDate + 'T' + rescheduleTime), $prefs.timezone, 'reject').toDate().toISOString() });
 			reschedulingId = null;
 			await load();
 		} catch (e: any) {
@@ -273,7 +233,6 @@
 	}
 
 	function fmt(iso: string) { return fmtDateTime(iso, $prefs); }
-	function fmtSlotTime(iso: string) { return fmtTime(iso, $prefs); }
 	function fmtMoney(cents?: number, cur?: string) {
 		if (!cents) return '';
 		const amt = (cents / 100).toFixed(2);
@@ -345,17 +304,6 @@
 		</div>
 
 		<div class="ml-auto flex flex-wrap items-center gap-2">
-			<Select.Root type="single" bind:value={fEventType} onValueChange={reload}>
-				<Select.Trigger class="h-9 w-[170px]" aria-label={$t('bookings.filters.eventTypeAria')}>
-					{fEventType ? eventTypeName(fEventType) : $t('bookings.filters.allEventTypes')}
-				</Select.Trigger>
-				<Select.Content>
-					<Select.Item value="" label={$t('bookings.filters.allEventTypes')}>{$t('bookings.filters.allEventTypes')}</Select.Item>
-					{#each eventTypes as et}
-						<Select.Item value={et.slug} label={et.name}>{et.name}</Select.Item>
-					{/each}
-				</Select.Content>
-			</Select.Root>
 
 			{#if isAdmin && scope === 'all'}
 				<Select.Root type="single" bind:value={fHost} onValueChange={reload}>
@@ -421,7 +369,6 @@
 				<tr class="border-b">
 					<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('bookings.table.attendee')}</th>
 					{#if scope === 'all'}<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('bookings.table.host')}</th>{/if}
-					<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('bookings.table.event')}</th>
 					<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('bookings.table.startTime')}</th>
 					<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('bookings.table.status')}</th>
 					<th class="px-4 pb-3 pt-3"></th>
@@ -447,7 +394,6 @@
 							{/if}
 						</td>
 						{#if scope === 'all'}<td class="px-4 py-3 text-muted-foreground">{b.host_name || '—'}</td>{/if}
-						<td class="px-4 py-3 font-mono text-xs text-muted-foreground">{b.event_type_slug ?? '—'}</td>
 						<td class="px-4 py-3 text-muted-foreground">{fmt(b.start_at)}</td>
 						<td class="px-4 py-3">
 							<div class="flex flex-wrap items-center gap-1.5">
@@ -527,7 +473,7 @@
 
 					{#if expandedId === b.id}
 						<tr>
-							<td colspan={scope === 'all' ? 6 : 5} class="p-0">
+							<td colspan={scope === 'all' ? 5 : 4} class="p-0">
 								<div class="border-t bg-muted/20 px-4 py-3">
 									<p class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{$t('bookings.details.title')}</p>
 									<dl class="mb-3 space-y-1.5 text-sm">
@@ -589,57 +535,24 @@
 
 					{#if reschedulingId === b.id}
 						<tr>
-							<td colspan={scope === 'all' ? 6 : 5} class="p-0">
+							<td colspan={scope === 'all' ? 5 : 4} class="p-0">
 								<div class="border-t bg-muted/30 px-4 py-4">
 									<p class="mb-3 text-sm font-medium">{$t('bookings.reschedule.title', { name: b.attendees?.[0]?.name ?? $t('bookings.reschedule.attendeeFallback') })}</p>
 
 									<div class="flex flex-wrap items-end gap-3">
-										<div class="space-y-1.5">
-											<p class="text-sm font-medium">{$t('bookings.reschedule.newDate')}</p>
-											<DatePicker
-												bind:value={rescheduleDate}
-												placeholder={$t('bookings.reschedule.pickDate')}
-												minToday
-												class="w-[180px]"
-											/>
-										</div>
-
-										{#if slotsLoading}
-											<p class="pb-1 text-sm text-muted-foreground">{$t('bookings.reschedule.loadingSlots')}</p>
-										{:else if slotsError}
-											<p class="rounded-md bg-destructive/10 px-3 py-1.5 text-sm text-destructive">{slotsError}</p>
-										{:else if rescheduleDate && slots.length === 0}
-											<p class="pb-1 text-sm text-muted-foreground">{$t('bookings.reschedule.noSlots')}</p>
-										{/if}
+										<label class="space-y-1 text-sm">
+											<span>{$t('schedule.date')}</span>
+											<Input type="date" bind:value={rescheduleDate} />
+										</label>
+										<label class="space-y-1 text-sm">
+											<span>{$t('schedule.start')} · {$prefs.timezone}</span>
+											<Input type="time" bind:value={rescheduleTime} />
+										</label>
+										<Button onclick={confirmReschedule} disabled={rescheduling || !rescheduleDate || !rescheduleTime}>
+											{$t(rescheduling ? 'common.saving' : 'common.save')}
+										</Button>
 									</div>
-
-									{#if slots.length > 0}
-										<div class="mt-3 flex flex-wrap gap-2">
-											{#each slots as slot}
-												<button
-													onclick={() => (selectedSlot = slot.start)}
-													class="inline-flex items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors {selectedSlot === slot.start ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'border bg-background hover:bg-accent hover:text-accent-foreground'}"
-												>
-													{fmtSlotTime(slot.start)}
-												</button>
-											{/each}
-										</div>
-									{/if}
-
-									{#if rescheduleError}
-										<p class="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{rescheduleError}</p>
-									{/if}
-
-									{#if selectedSlot}
-										<div class="mt-4 flex gap-2">
-											<Button onclick={confirmReschedule} disabled={rescheduling}>
-												{rescheduling ? $t('bookings.reschedule.saving') : $t('bookings.reschedule.confirm', { time: fmtSlotTime(selectedSlot) })}
-											</Button>
-											<Button variant="outline" onclick={cancelReschedule}>
-												{$t('common.cancel')}
-											</Button>
-										</div>
-									{/if}
+									{#if rescheduleError}<p role="alert" class="mt-3 text-sm text-destructive">{rescheduleError}</p>{/if}
 								</div>
 							</td>
 						</tr>

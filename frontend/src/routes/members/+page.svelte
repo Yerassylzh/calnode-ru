@@ -432,7 +432,6 @@
 							<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('members.col.name')}</th>
 							<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('members.col.role')}</th>
 							<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('members.col.teams')}</th>
-							<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('members.col.page')}</th>
 							<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('members.col.auth')}</th>
 							<th class="px-4 pb-3 pt-3 text-left text-xs font-medium text-muted-foreground">{$t('members.col.joined')}</th>
 							{#if $currentUser?.is_admin}<th class="px-4 pb-3 pt-3"></th>{/if}
@@ -473,13 +472,6 @@
 											<span class="text-xs text-muted-foreground/50">—</span>
 										{/each}
 									</div>
-								</td>
-								<td class="px-4 py-3">
-									{#if m.handle}
-										<a href="/u/{m.handle}" target="_blank" rel="noopener noreferrer" class="text-xs text-primary hover:underline font-mono">/u/{m.handle}</a>
-									{:else}
-										<span class="text-xs text-muted-foreground/50" title={$t('members.noPublicPage')}>—</span>
-									{/if}
 								</td>
 								<td class="px-4 py-3">
 									<div class="flex gap-1.5 flex-wrap">
