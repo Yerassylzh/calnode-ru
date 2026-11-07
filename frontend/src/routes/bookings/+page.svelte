@@ -180,6 +180,7 @@
 	}
 
 	onMount(() => {
+		scope = isAdmin ? 'all' : 'mine';
 		load();
 		loadFilterOptions();
 	});

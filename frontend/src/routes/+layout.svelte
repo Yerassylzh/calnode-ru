@@ -311,8 +311,8 @@
 		</aside>
 
 		<!-- Main content -->
-		<main class="flex-1 overflow-y-auto bg-background">
-			<div class={isSchedule ? '' : 'mx-auto max-w-4xl px-8 py-8'}>
+		<main class="min-w-0 flex-1 bg-background {isSchedule ? 'overflow-hidden' : 'overflow-y-auto'}">
+			<div class={isSchedule ? 'h-full min-h-0' : 'mx-auto max-w-4xl px-8 py-8'}>
 				{@render children()}
 			</div>
 		</main>

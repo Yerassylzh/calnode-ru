@@ -1,9 +1,17 @@
 import type { CatalogEntry } from '../index';
 
 export const en: Record<string, CatalogEntry> = {
-	'schedule.title': 'Weekly calendar',
+	'schedule.title': 'Calendar',
 	'schedule.staff': 'Staff member',
-	'schedule.calendarConnections': 'Calendar connections',
+	'schedule.calendarConnections': 'Integrations',
+	'schedule.appointment': 'Appointment',
+	'schedule.bookingDetails': 'Booking details',
+	'schedule.cancelBooking': 'Cancel booking',
+	'schedule.cancelHelp': 'Cancel this appointment?',
+	'schedule.pickTime': 'Choose time',
+	'schedule.hours': 'Hours',
+	'schedule.minutes': 'Minutes',
+	'schedule.minuteUnit': 'min',
 	'schedule.free': 'Available',
 	'schedule.breaks': 'Breaks',
 	'schedule.today': 'Today',
@@ -31,9 +39,17 @@ export const en: Record<string, CatalogEntry> = {
 };
 
 export const ru: Record<string, CatalogEntry> = {
-	'schedule.title': 'Календарь на неделю',
+	'schedule.title': 'Календарь',
 	'schedule.staff': 'Сотрудник',
-	'schedule.calendarConnections': 'Подключение календарей',
+	'schedule.calendarConnections': 'Интеграции',
+	'schedule.appointment': 'Запись',
+	'schedule.bookingDetails': 'Детали записи',
+	'schedule.cancelBooking': 'Отменить запись',
+	'schedule.cancelHelp': 'Отменить эту запись?',
+	'schedule.pickTime': 'Выбрать время',
+	'schedule.hours': 'Часы',
+	'schedule.minutes': 'Минуты',
+	'schedule.minuteUnit': 'мин',
 	'schedule.free': 'Свободно',
 	'schedule.breaks': 'Перерывы',
 	'schedule.today': 'Сегодня',

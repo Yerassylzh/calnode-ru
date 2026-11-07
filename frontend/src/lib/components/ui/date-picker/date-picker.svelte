@@ -10,17 +10,23 @@
 		value = $bindable(''),
 		placeholder,
 		minToday = false,
+		id,
+		ariaLabel,
+		timezone,
 		class: className = '',
 	}: {
 		value?: string;
 		placeholder?: string;
 		minToday?: boolean;
+		id?: string;
+		ariaLabel?: string;
+		timezone?: string;
 		class?: string;
 	} = $props();
 
 	let open = $state(false);
 
-	const tz = getLocalTimeZone();
+	const tz = $derived(timezone || getLocalTimeZone());
 
 	let calValue = $state<DateValue | undefined>(undefined);
 	$effect(() => {
@@ -45,6 +51,8 @@
 
 <Popover.Root bind:open>
 	<Popover.Trigger
+		{id}
+		aria-label={ariaLabel}
 		class={cn(
 			buttonVariants({ variant: 'outline' }),
 			'w-[200px] justify-start text-left font-normal',
