@@ -434,6 +434,10 @@ func (h *Handler) loadHostSchedule(ctx context.Context, userID, eventTypeID stri
 }
 
 func (h *Handler) hostAvailability(ctx context.Context, userID, eventTypeID string, dateFrom, dateTo time.Time) (slots.HostAvailability, bool, error) {
+	return h.hostAvailabilityExcluding(ctx, userID, eventTypeID, dateFrom, dateTo, "")
+}
+
+func (h *Handler) hostAvailabilityExcluding(ctx context.Context, userID, eventTypeID string, dateFrom, dateTo time.Time, excludeBookingID string) (slots.HostAvailability, bool, error) {
 	hostLoc, rules, overrides, err := h.loadHostSchedule(ctx, userID, eventTypeID)
 	if err != nil {
 		return slots.HostAvailability{}, false, err
@@ -452,7 +456,7 @@ func (h *Handler) hostAvailability(ctx context.Context, userID, eventTypeID stri
 	// a multi-host call isn't offered an overlapping slot on another event.
 	busyRows, err := h.db.QueryContext(ctx, `
 		SELECT b.start_at, b.end_at FROM bookings b
-		WHERE b.status != 'cancelled' AND b.end_at > ? AND b.start_at < ?
+		WHERE b.status != 'cancelled' AND b.end_at > ? AND b.start_at < ? AND b.id != ?
 		  AND (b.host_id = ? OR EXISTS (
 		    SELECT 1 FROM booking_hosts bh WHERE bh.booking_id = b.id AND (
 		      bh.user_id = ? OR EXISTS (
@@ -462,7 +466,7 @@ func (h *Handler) hostAvailability(ctx context.Context, userID, eventTypeID stri
 		          AND destination.user_id = bh.user_id AND destination.is_destination = 1
 		      )
 		    )
-		  ))`, busyFrom, busyTo, userID, userID, userID)
+		  ))`, busyFrom, busyTo, excludeBookingID, userID, userID, userID)
 	if err != nil {
 		return slots.HostAvailability{}, false, err
 	}

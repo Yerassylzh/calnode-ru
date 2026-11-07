@@ -105,6 +105,9 @@ short for the appointment. Choose any start that leaves room for the full appoin
 Both endpoints default to the authenticated user's staff ID. Date ranges are limited to
 32 days.
 
+For rescheduling, pass `exclude_booking_id` to the availability endpoint. It checks the
+booking's hosts and rules while allowing the appointment's own current time.
+
 A booking requires a start, a duration in minutes, an attendee name, and an email or
 contact_phone. On a 409 time_unavailable response, refresh availability and offer another
 time. Retry an identical booking request with the same idempotency key. A 503 means a

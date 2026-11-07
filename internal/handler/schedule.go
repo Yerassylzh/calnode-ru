@@ -72,17 +72,65 @@ func (h *Handler) GetScheduleAvailability(w http.ResponseWriter, r *http.Request
 		h.writeStaffLookupError(w, err)
 		return
 	}
-	result := make([]scheduleWindow, 0)
-	if from.Before(to) {
-		free, err := h.staffWindows(ctx, staffID, from, to)
-		if errors.Is(err, errCalendarUnavailable) {
-			h.writeError(w, http.StatusServiceUnavailable, errCalendarUnavailable.Error())
+	excludeID := q.Get("exclude_booking_id")
+	config := &bookableEventType{}
+	hostIDs := []string{staffID}
+	if excludeID != "" {
+		b, err := h.bookingSvc.Get(ctx, excludeID)
+		if err != nil || !h.userHostsBooking(ctx, staffID, excludeID) {
+			h.writeError(w, http.StatusNotFound, "booking not found")
 			return
 		}
-		if err != nil {
-			h.logger.ErrorContext(ctx, "schedule availability", "error", err)
-			h.writeError(w, http.StatusInternalServerError, "could not load availability")
-			return
+		minutes = int((b.EndAt.Sub(b.StartAt) + time.Minute - 1) / time.Minute)
+		config.ID = b.EventTypeID
+		hostIDs = []string{b.HostID}
+		if b.EventTypeID != "" {
+			if err := h.db.QueryRowContext(ctx, `SELECT min_notice_minutes, max_future_days,
+				buffer_before_minutes, buffer_after_minutes FROM event_types WHERE id = ?`, b.EventTypeID).
+				Scan(&config.MinNoticeMinutes, &config.MaxFutureDays, &config.BufferBeforeMinutes, &config.BufferAfterMinutes); err != nil {
+				h.writeError(w, http.StatusInternalServerError, "could not load booking rules")
+				return
+			}
+			hosts, err := h.assignedHosts(ctx, excludeID)
+			if err != nil {
+				h.writeError(w, http.StatusInternalServerError, "could not load booking hosts")
+				return
+			}
+			if len(hosts) > 0 {
+				hostIDs = nil
+				for _, host := range hosts {
+					hostIDs = append(hostIDs, host.UserID)
+				}
+			}
+			maxDays := config.MaxFutureDays
+			if maxDays <= 0 {
+				maxDays = 365
+			}
+			latestEnd := bookingNow().Add(time.Duration(maxDays)*24*time.Hour + b.EndAt.Sub(b.StartAt))
+			if to.After(latestEnd) {
+				to = latestEnd
+			}
+		}
+		earliest := bookingNow().Add(time.Duration(config.MinNoticeMinutes) * time.Minute)
+		if from.Before(earliest) {
+			from = earliest
+		}
+	}
+	result := make([]scheduleWindow, 0)
+	if from.Before(to) {
+		free := []slots.Interval{{Start: from, End: to}}
+		for _, hostID := range hostIDs {
+			windows, err := h.staffWindows(ctx, hostID, from, to, config, excludeID)
+			if errors.Is(err, errCalendarUnavailable) {
+				h.writeError(w, http.StatusServiceUnavailable, errCalendarUnavailable.Error())
+				return
+			}
+			if err != nil {
+				h.logger.ErrorContext(ctx, "schedule availability", "error", err)
+				h.writeError(w, http.StatusInternalServerError, "could not load availability")
+				return
+			}
+			free = slots.SubtractIntervals(free, slots.SubtractIntervals([]slots.Interval{{Start: from, End: to}}, windows))
 		}
 		for _, window := range free {
 			if window.End.Sub(window.Start) >= time.Duration(minutes)*time.Minute {
@@ -117,15 +165,19 @@ func (h *Handler) writeStaffLookupError(w http.ResponseWriter, err error) {
 	h.writeError(w, http.StatusInternalServerError, "could not load staff member")
 }
 
-func (h *Handler) staffWindows(ctx context.Context, staffID string, from, to time.Time) ([]slots.Interval, error) {
+func (h *Handler) staffWindows(ctx context.Context, staffID string, from, to time.Time, config *bookableEventType, excludeID string) ([]slots.Interval, error) {
 	startDay := from.UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
 	endDay := to.UTC().Truncate(24*time.Hour).AddDate(0, 0, 1)
-	avail, degraded, err := h.hostAvailability(ctx, staffID, "", startDay, endDay)
+	avail, degraded, err := h.hostAvailabilityExcluding(ctx, staffID, config.ID, startDay, endDay, excludeID)
 	if err != nil {
 		return nil, err
 	}
 	if degraded {
 		return nil, errCalendarUnavailable
+	}
+	for index := range avail.Busy {
+		avail.Busy[index].Start = avail.Busy[index].Start.Add(-time.Duration(config.BufferBeforeMinutes) * time.Minute)
+		avail.Busy[index].End = avail.Busy[index].End.Add(time.Duration(config.BufferAfterMinutes) * time.Minute)
 	}
 	var working []slots.Interval
 	for day := startDay; !day.After(endDay); day = day.AddDate(0, 0, 1) {

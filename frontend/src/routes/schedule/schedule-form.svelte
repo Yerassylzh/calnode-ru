@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { parseAbsolute, parseDateTime, toZoned } from '@internationalized/date';
+	import { parseAbsolute, parseDate, parseDateTime, toZoned } from '@internationalized/date';
 	import { CalendarDays, Clock3, Mail, MapPin, Phone, UserRound } from '@lucide/svelte';
 	import { api, type Booking, type DoctorBreak } from '$lib/api';
 	import { localeTag, t } from '$lib/i18n';
@@ -39,6 +39,60 @@
 	let error = $state('');
 	let lastPayload = '';
 	let idempotencyKey = '';
+	let freeWindows = $state<{ start_at: string; end_at: string }[]>([]);
+	let availabilityLoading = $state(false);
+	let availabilityError = $state('');
+	let availabilityVersion = $state(0);
+	const needsAvailability = $derived(kind === 'booking' || (kind === 'details' && editing));
+	const appointmentMinutes = $derived(kind === 'details' && appointment
+		? Math.ceil((Date.parse(appointment.end_at) - Date.parse(appointment.start_at)) / 60000)
+		: duration);
+	const allowedStarts = $derived.by(() => {
+		if (!needsAvailability) return undefined;
+		const result = new Set<number>();
+		if (availabilityLoading || availabilityError || !date || !appointmentMinutes) return result;
+		const windows = freeWindows.map((window) => ({ start: Date.parse(window.start_at), end: Date.parse(window.end_at) }));
+		for (let minute = 0; minute < 24 * 60; minute++) {
+			const time = [Math.floor(minute / 60), minute % 60].map((part) => String(part).padStart(2, '0')).join(':');
+			try {
+				const instant = toZoned(parseDateTime(date + 'T' + time), timezone, 'reject').toDate().getTime();
+				if (windows.some((window) => instant >= window.start && instant + appointmentMinutes * 60000 <= window.end)) result.add(minute);
+			} catch {
+				// A wall-clock minute can be absent or ambiguous at a timezone transition.
+			}
+		}
+		return result;
+	});
+	const timeAvailable = $derived(allowedStarts === undefined || (
+		/^([01]\d|2[0-3]):[0-5]\d$/.test(start) && allowedStarts.has(Number(start.slice(0, 2)) * 60 + Number(start.slice(3)))
+	));
+
+	$effect(() => {
+		availabilityVersion;
+		if (!needsAvailability || !date || !Number.isInteger(appointmentMinutes) || !appointmentMinutes || appointmentMinutes < 1 || appointmentMinutes > 1440) {
+			freeWindows = [];
+			availabilityLoading = false;
+			availabilityError = '';
+			return;
+		}
+		const day = parseDate(date);
+		const query = new URLSearchParams({
+			staff_id: staffID,
+			from: day.toDate(timezone).toISOString(),
+			to: day.add({ days: 1 }).toDate(timezone).toISOString(),
+			duration_minutes: String(appointmentMinutes)
+		});
+		if (kind === 'details' && appointment) query.set('exclude_booking_id', appointment.id);
+		let current = true;
+		freeWindows = [];
+		availabilityLoading = true;
+		availabilityError = '';
+		api.get<{ windows: { start_at: string; end_at: string }[] }>('/v1/schedule/availability?' + query)
+			.then((response) => { if (current) freeWindows = response.windows; })
+			.catch((failure) => { if (current) availabilityError = failure instanceof Error ? failure.message : $t('schedule.loadFailed'); })
+			.finally(() => { if (current) availabilityLoading = false; });
+		return () => { current = false; };
+	});
 
 	$effect(() => {
 		if (kind === 'details' && appointment) {
@@ -84,6 +138,10 @@
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
 		if (saving) return;
+		if (needsAvailability && !timeAvailable) {
+			error = $t('schedule.timeUnavailable');
+			return;
+		}
 		saving = true;
 		error = '';
 		try {
@@ -116,6 +174,7 @@
 		} catch (failure) {
 			error = failure instanceof RangeError ? $t('schedule.invalidTime')
 				: failure instanceof Error ? failure.message : $t('common.error');
+			if (needsAvailability && (failure as { status?: number })?.status === 409) availabilityVersion++;
 		} finally {
 			saving = false;
 		}
@@ -188,7 +247,7 @@
 				</div>
 				<div class="space-y-2">
 					<Label for="schedule-start">{$t('schedule.start')}</Label>
-					<TimePicker id="schedule-start" label={$t('schedule.start')} bind:value={start} />
+					<TimePicker id="schedule-start" label={$t('schedule.start')} bind:value={start} allowedMinutes={allowedStarts} />
 				</div>
 				{#if kind === 'booking'}
 					<div class="space-y-2">
@@ -208,6 +267,18 @@
 						<Input id="schedule-break-title" class="h-11 bg-muted/15 shadow-xs" bind:value={title} placeholder={$t('doctorBreaks.defaultTitle')} />
 					</div>
 				</div>
+			{/if}
+		{/if}
+		{#if needsAvailability}
+			{#if availabilityLoading}
+				<p role="status" class="text-sm text-muted-foreground">{$t('schedule.checkingAvailability')}</p>
+			{:else if availabilityError}
+				<div role="alert" class="flex items-center justify-between gap-3 text-sm text-destructive">
+					<span>{availabilityError}</span>
+					<Button type="button" variant="outline" size="sm" onclick={() => availabilityVersion++}>{$t('common.retry')}</Button>
+				</div>
+			{:else if !timeAvailable && /^([01]\d|2[0-3]):[0-5]\d$/.test(start)}
+				<p role="status" class="text-sm text-muted-foreground">{$t('schedule.timeUnavailable')}</p>
 			{/if}
 		{/if}
 		{#if confirmingCancel}<p class="rounded-lg bg-destructive/5 p-3 text-sm text-destructive">{$t('schedule.cancelHelp')}</p>{/if}
@@ -230,7 +301,7 @@
 			{/if}
 		{:else}
 			<Button variant="outline" type="button" disabled={saving} onclick={() => { if (editing) { editing = false; error = ''; } else onDismiss(); }}>{$t('common.cancel')}</Button>
-			<Button type="submit" variant={kind === 'removeBreak' ? 'destructive' : 'default'} disabled={saving}>
+			<Button type="submit" variant={kind === 'removeBreak' ? 'destructive' : 'default'} disabled={saving || (needsAvailability && !timeAvailable)}>
 				{$t(saving ? 'common.saving' : kind === 'removeBreak' ? 'common.delete' : kind === 'booking' ? 'schedule.newBooking' : 'common.save')}
 			</Button>
 		{/if}

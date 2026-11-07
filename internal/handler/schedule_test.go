@@ -72,6 +72,15 @@ func TestScheduleBooksAnOffGridTimeAndRejectsOverlaps(t *testing.T) {
 	if replayed.Code != http.StatusCreated || replayed.Body.String() != created.Body.String() {
 		t.Fatalf("replay differed: %d %s", replayed.Code, replayed.Body)
 	}
+	excluded := httptest.NewRecorder()
+	h.RequireAuth(h.GetScheduleAvailability)(excluded, authReq(http.MethodGet, path+"&exclude_booking_id="+id, "", key))
+	mustStatus(t, excluded, http.StatusOK, "reschedule availability")
+	if excluded.Body.String() != rec.Body.String() {
+		t.Fatalf("reschedule availability still blocks its own appointment: %s", excluded.Body)
+	}
+	missing := httptest.NewRecorder()
+	h.RequireAuth(h.GetScheduleAvailability)(missing, authReq(http.MethodGet, path+"&exclude_booking_id=missing", "", key))
+	mustStatus(t, missing, http.StatusNotFound, "missing excluded booking")
 	conflict := mustJSON(t, book("15:20", "overlap"), http.StatusConflict, "overlapping booking")
 	if conflict["code"] != "time_unavailable" {
 		t.Fatalf("missing conflict code: %v", conflict)
