@@ -501,6 +501,10 @@
 											</div>
 										{/if}
 									</dl>
+									{#if b.notes}
+										<p class="mb-1 text-sm font-medium">{$t('schedule.notes')}</p>
+										<p class="mb-3 whitespace-pre-wrap break-words text-sm text-muted-foreground">{b.notes}</p>
+									{/if}
 									<p class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{$t('bookings.details.intake')}</p>
 									{#if answersLoading[b.id]}
 										<p class="text-sm text-muted-foreground">{$t('common.loading')}</p>

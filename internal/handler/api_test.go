@@ -691,7 +691,7 @@ func TestCreateBooking_doubleBooked(t *testing.T) {
 	}
 }
 
-func TestGetBooking_public(t *testing.T) {
+func TestGetBooking_authenticated(t *testing.T) {
 	h, key, _ := setupWorkspace(t)
 	slug, _ := seedEventTypeHTTP(t, h, key)
 
@@ -704,11 +704,11 @@ func TestGetBooking_public(t *testing.T) {
 	created := mustCreated(t, rec, "create booking")
 	bookingID := mustString(t, created, "id", "create booking")
 
-	// Get without auth key.
-	req2 := httptest.NewRequest(http.MethodGet, "/v1/bookings/"+bookingID, nil)
+	// Get as an authenticated staff member.
+	req2 := authReq(http.MethodGet, "/v1/bookings/"+bookingID, "", key)
 	req2.SetPathValue("id", bookingID)
 	rec2 := httptest.NewRecorder()
-	h.GetBooking(rec2, req2)
+	h.RequireAuth(h.GetBooking)(rec2, req2)
 
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("get booking: %d — %s", rec2.Code, rec2.Body.String())

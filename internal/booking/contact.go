@@ -3,25 +3,44 @@ package booking
 import (
 	"errors"
 	"net/mail"
+	"regexp"
 	"strings"
 )
 
 var ErrInvalidContact = errors.New("booking: invalid contact")
 
 // ContactError is safe to return to an API caller. Never include the raw contact.
-type ContactError struct{ Message string }
+type ContactError struct {
+	Message string
+	Code    string
+	Field   string
+}
 
 func (e *ContactError) Error() string { return e.Message }
 func (e *ContactError) Unwrap() error { return ErrInvalidContact }
 
 func contactError(message string) error { return &ContactError{Message: message} }
 
+var internationalPhone = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
+
+// ValidatePhone requires the canonical international representation. Separators,
+// local prefixes, surrounding whitespace and extensions are rejected.
+func ValidatePhone(phone, field string) error {
+	if !internationalPhone.MatchString(phone) {
+		return &ContactError{
+			Message: "Phone must contain + followed by 7–15 digits, for example +77011234567.",
+			Code:    "invalid_phone",
+			Field:   field,
+		}
+	}
+	return nil
+}
+
 // NormalizeContact validates both supplied channels and resolves the primary one.
 // Phone is contact information, independent of the appointment's location.
 func NormalizeContact(a Attendee) (Attendee, error) {
 	a.Name = strings.TrimSpace(a.Name)
 	a.Email = strings.TrimSpace(a.Email)
-	a.Phone = strings.TrimSpace(a.Phone)
 	if a.Name == "" {
 		return a, contactError("name is required")
 	}
@@ -36,24 +55,8 @@ func NormalizeContact(a Attendee) (Attendee, error) {
 		a.Email = address.Address
 	}
 	if a.Phone != "" {
-		if len(a.Phone) > 64 {
-			return a, contactError("contact_phone must be an international number, e.g. +77011234567")
-		}
-		var number strings.Builder
-		for i, c := range a.Phone {
-			switch {
-			case c == '+' && i == 0:
-				number.WriteRune(c)
-			case c >= '0' && c <= '9':
-				number.WriteRune(c)
-			case c == ' ' || c == '-' || c == '(' || c == ')' || c == '.':
-			default:
-				return a, contactError("contact_phone must be an international number, e.g. +77011234567")
-			}
-		}
-		a.Phone = number.String()
-		if len(a.Phone) < 8 || len(a.Phone) > 16 || a.Phone[0] != '+' || a.Phone[1] == '0' {
-			return a, contactError("contact_phone must have + followed by 7–15 digits, e.g. +77011234567")
+		if err := ValidatePhone(a.Phone, "contact_phone"); err != nil {
+			return a, err
 		}
 	}
 	if a.ContactMethod == "" {

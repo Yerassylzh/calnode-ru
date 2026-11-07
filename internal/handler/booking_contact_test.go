@@ -21,7 +21,7 @@ func TestPhoneOnlyRESTBookingAndPrivateManageLink(t *testing.T) {
 	if _, err := database.Exec("UPDATE event_types SET location_type='in_person', location_value='Office' WHERE id=?", eventID); err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"event_type_slug":%q,"start_at":"2026-06-15T09:00:00Z","name":"Alex","contact_phone":"+7 (701) 123-45-67"}`, slug)
+	body := fmt.Sprintf(`{"event_type_slug":%q,"start_at":"2026-06-15T09:00:00Z","name":"Alex","contact_phone":"+77011234567"}`, slug)
 	create := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/v1/bookings", strings.NewReader(body))
 		req.Header.Set("Idempotency-Key", "phone-contact-retry")

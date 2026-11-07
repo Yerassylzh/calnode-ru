@@ -102,6 +102,7 @@ export type Question = {
 
 export type Booking = {
 	id: string;
+	notes?: string;
 	event_type_slug: string;
 	start_at: string;
 	end_at: string;
@@ -318,10 +319,19 @@ export type AvailabilityOverride = {
 	date: string;
 	is_available: boolean;
 	reason: 'day_off' | 'out_of_office' | 'custom_hours';
+	notes?: string;
 	start_time: string | null;
 	end_time: string | null;
 	/** Set on per-date rows that belong to a multi-day out-of-office span. */
 	group_id?: string;
+};
+
+export type ScheduleDay = {
+	date: string;
+	is_day_off: boolean;
+	reason?: 'day_off' | 'out_of_office' | 'not_scheduled';
+	notes?: string;
+	override_id?: string;
 };
 
 export type DoctorBreak = {

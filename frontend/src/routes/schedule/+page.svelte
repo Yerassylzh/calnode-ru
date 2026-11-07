@@ -2,9 +2,9 @@
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { getDayOfWeek, today, type CalendarDate } from '@internationalized/date';
-	import { ChevronLeft, ChevronRight, Coffee, Plus, Settings2, UserRound } from '@lucide/svelte';
+	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Plus, Settings2, UserRound } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
-	import { api, type Booking, type DoctorBreak, type TeamMember } from '$lib/api';
+	import { api, type Booking, type DoctorBreak, type ScheduleDay, type TeamMember } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
@@ -14,7 +14,7 @@
 
 	type Window = { start_at: string; end_at: string };
 	type Block = { id: string; start: number; end: number; label: string; kind: 'free' | 'booking' | 'break'; item?: Booking | DoctorBreak };
-	type Editor = 'booking' | 'break' | 'details' | 'removeBreak';
+	type Editor = 'booking' | 'break' | 'details' | 'removeBreak' | 'dayOff' | 'removeDayOff';
 
 	let staff = $state<Pick<TeamMember, 'id' | 'name' | 'email' | 'timezone'>[]>([]);
 	let staffID = $state('');
@@ -24,6 +24,8 @@
 	let bookings = $state<Booking[]>([]);
 	let breaks = $state<DoctorBreak[]>([]);
 	let windows = $state<Window[]>([]);
+	let scheduleDays = $state<ScheduleDay[]>([]);
+	const daysOff = $derived(new Map(scheduleDays.filter((day) => day.is_day_off).map((day) => [day.date, day])));
 	let loading = $state(true);
 	let calendarHeight = $state(0);
 	let loadError = $state('');
@@ -33,7 +35,7 @@
 	let editor = $state<Editor>('booking');
 	let initialDate = $state('');
 	let initialTime = $state('');
-	let target = $state<Booking | DoctorBreak>();
+	let target = $state<Booking | DoctorBreak | ScheduleDay>();
 
 	const blocks = $derived(days.map((day) => {
 		const items: Block[] = [];
@@ -127,12 +129,13 @@
 			const [bookingItems, breakItems, free] = await Promise.allSettled([
 				loadBookings(bookingParams),
 				api.get<{ items: DoctorBreak[] }>('/v1/doctor-breaks?' + new URLSearchParams({ user_id: id })),
-				api.get<{ windows: Window[] }>('/v1/schedule/availability?' + scheduleParams)
+				api.get<{ windows: Window[]; days: ScheduleDay[] }>('/v1/schedule/availability?' + scheduleParams)
 			]);
 			if (request !== version) return;
 			bookings = bookingItems.status === 'fulfilled' ? bookingItems.value : [];
 			breaks = breakItems.status === 'fulfilled' ? breakItems.value.items : [];
 			windows = free.status === 'fulfilled' ? free.value.windows : [];
+			scheduleDays = free.status === 'fulfilled' ? free.value.days ?? [] : [];
 			const failed = [bookingItems, breakItems].find((result) => result.status === 'rejected');
 			if (failed?.status === 'rejected') loadError = message(failed.reason);
 			if (free.status === 'rejected') availabilityError = message(free.reason);
@@ -156,7 +159,7 @@
 		void load();
 	}
 
-	function open(kind: Editor, date = defaultDate(), time = '09:00', item?: Booking | DoctorBreak) {
+	function open(kind: Editor, date = defaultDate(), time = '09:00', item?: Booking | DoctorBreak | ScheduleDay) {
 		editor = kind;
 		initialDate = date;
 		initialTime = time;
@@ -215,6 +218,9 @@
 			<Button variant="outline" onclick={() => open('break')} disabled={!staffID || loading} aria-label={$t('schedule.addBreak')}>
 				<Coffee class="size-4" /><span class="hidden xl:inline">{$t('schedule.addBreak')}</span>
 			</Button>
+			<Button variant="outline" onclick={() => open('dayOff')} disabled={!staffID || loading} aria-label={$t('schedule.addDayOff')} title={$t('schedule.addDayOff')}>
+				<CalendarOff class="size-4" /><span class="hidden xl:inline">{$t('schedule.dayOff')}</span>
+			</Button>
 			<Button onclick={() => open('booking')} disabled={!staffID || loading}><Plus class="size-4" />{$t('schedule.newBooking')}</Button>
 		</div>
 	</header>
@@ -248,10 +254,22 @@
 						<span class="absolute inset-x-0 bottom-0 text-center text-[10px] tabular-nums text-muted-foreground">{clock(lastHour * 60)}</span>
 					</div>
 					{#each days as day, i (day.toString())}
-						<div class="relative min-h-0 border-l bg-muted/25">
+						{@const off = daysOff.get(day.toString())}
+						<div class="relative min-h-0 border-l {off ? 'bg-muted/60' : 'bg-muted/25'}">
 							{#each hours as hour (hour)}
 								<div class="border-b border-border/80" style:height={100 / hours.length + '%'}></div>
 							{/each}
+							{#if off}
+								{#if off.override_id}
+									<button type="button" onclick={() => open('removeDayOff', off.date, '09:00', off)}
+										class="absolute inset-x-2 top-3 rounded-lg border border-dashed bg-card/70 px-2 py-3 text-left text-xs text-muted-foreground transition-colors hover:bg-card">
+										<span class="flex items-center gap-1.5 font-medium"><CalendarOff class="size-3.5 shrink-0" />{$t('schedule.dayOff')}</span>
+										{#if off.notes}<span class="mt-1 block line-clamp-3 break-words" title={off.notes}>{off.notes}</span>{/if}
+									</button>
+								{:else}
+									<p class="absolute inset-x-2 top-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground"><CalendarOff class="size-3.5" />{$t('schedule.dayOff')}</p>
+								{/if}
+							{/if}
 							{#each blocks[i] as block (block.kind + block.id)}
 								<button type="button" onclick={(event) => onBlock(day, block, event)}
 									class="absolute inset-x-1 flex flex-col items-start justify-start overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-left text-xs leading-tight transition hover:brightness-95 focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-primary
@@ -277,7 +295,7 @@
 <Dialog.Root bind:open={dialogOpen}>
 	<Dialog.Content class="max-h-[90dvh] max-w-[calc(100%-2rem)] gap-0 overflow-y-auto rounded-2xl p-0 sm:max-w-[640px]">
 		<Dialog.Header class="border-b px-6 py-5 pr-12">
-			<Dialog.Title>{$t(editor === 'break' ? 'schedule.addBreak' : editor === 'details' ? 'schedule.bookingDetails' : editor === 'removeBreak' ? 'schedule.removeBreak' : 'schedule.newBooking')}</Dialog.Title>
+			<Dialog.Title>{$t(editor === 'dayOff' ? 'schedule.addDayOff' : editor === 'removeDayOff' ? 'schedule.removeDayOff' : editor === 'break' ? 'schedule.addBreak' : editor === 'details' ? 'schedule.bookingDetails' : editor === 'removeBreak' ? 'schedule.removeBreak' : 'schedule.newBooking')}</Dialog.Title>
 			<Dialog.Description class={editor === 'details' ? 'sr-only' : ''}>{staff.find((member) => member.id === staffID)?.name || timezone}</Dialog.Description>
 		</Dialog.Header>
 		{#if dialogOpen}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"github.com/calnode/calnode/internal/booking"
 	"net/http"
 )
@@ -17,5 +18,11 @@ func (h *Handler) createdBookingJSON(b *booking.Booking) bookingJSON {
 }
 
 func (h *Handler) writeContactError(w http.ResponseWriter, err error) {
-	h.writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "invalid_booking_contact"})
+	body := map[string]string{"error": err.Error(), "code": "invalid_booking_contact"}
+	var contact *booking.ContactError
+	if errors.As(err, &contact) && contact.Code != "" {
+		body["code"] = contact.Code
+		body["field"] = contact.Field
+	}
+	h.writeJSON(w, http.StatusBadRequest, body)
 }

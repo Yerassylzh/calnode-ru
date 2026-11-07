@@ -370,6 +370,10 @@ func (h *Handler) hostDisplayMap(ctx context.Context, ids []string) map[string]m
 // drift. Returns materialized slices, closing each cursor before opening the next — the
 // MaxOpenConns(1) pool can't hold two open cursors at once (see [[sqlite-single-connection]]).
 func (h *Handler) loadHostSchedule(ctx context.Context, userID, eventTypeID string) (*time.Location, []slots.AvailabilityRule, []slots.AvailabilityOverride, error) {
+	return h.loadHostScheduleData(ctx, userID, eventTypeID, true)
+}
+
+func (h *Handler) loadHostScheduleData(ctx context.Context, userID, eventTypeID string, applyBreaks bool) (*time.Location, []slots.AvailabilityRule, []slots.AvailabilityOverride, error) {
 	var hostTZName string
 	if err := h.db.QueryRowContext(ctx,
 		`SELECT iana_timezone FROM users WHERE id = ?`, userID).Scan(&hostTZName); err != nil {
@@ -429,7 +433,9 @@ func (h *Handler) loadHostSchedule(ctx context.Context, userID, eventTypeID stri
 		return nil, nil, nil, err
 	}
 
-	rules, overrides, err = h.applyBreaksToSchedule(ctx, userID, rules, overrides)
+	if applyBreaks {
+		rules, overrides, err = h.applyBreaksToSchedule(ctx, userID, rules, overrides)
+	}
 	return hostLoc, rules, overrides, err
 }
 

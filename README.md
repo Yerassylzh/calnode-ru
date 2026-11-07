@@ -85,6 +85,9 @@ and AI-ready** over feature-maximal, Calnode is built for you.
 
 ## Staff scheduling over REST
 
+The [staff booking API specification](docs/STAFF_BOOKING_API.md) covers creation,
+optional notes, rescheduling, customer lookup, and strict phone validation.
+
 The weekly calendar and agent integrations use staff working hours and exact appointment times.
 Members can schedule themselves. Admins can pass another staff member's ID, listed by GET /v1/users.
 

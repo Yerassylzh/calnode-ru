@@ -664,6 +664,7 @@ type bookingJSON struct {
 	StartAt            string `json:"start_at"`
 	EndAt              string `json:"end_at"`
 	Status             string `json:"status"`
+	Notes              string `json:"notes,omitempty"`
 	CancellationReason string `json:"cancellation_reason,omitempty"`
 	LocationValue      string `json:"location_value,omitempty"`
 	LocationType       string `json:"location_type,omitempty"`
@@ -697,6 +698,7 @@ func toBookingJSON(b *booking.Booking) bookingJSON {
 		StartAt:            b.StartAt.UTC().Format(time.RFC3339),
 		EndAt:              b.EndAt.UTC().Format(time.RFC3339),
 		Status:             b.Status,
+		Notes:              b.Notes,
 		CancellationReason: b.CancellationReason,
 		LocationValue:      b.LocationValue,
 		LocationType:       b.LocationType,
@@ -771,6 +773,7 @@ func (h *Handler) createBooking(w http.ResponseWriter, r *http.Request, schedule
 		EventTypeSlug   string `json:"event_type_slug"`
 		StaffID         string `json:"staff_id"`
 		DurationMinutes int    `json:"duration_minutes"`
+		Notes           string `json:"notes"`
 		StartAt         string `json:"start_at"`
 		Name            string `json:"name"`
 		Email           string `json:"email"`
@@ -823,6 +826,13 @@ func (h *Handler) createBooking(w http.ResponseWriter, r *http.Request, schedule
 			return
 		}
 		req.StaffID = staffID
+		if req.Phone != "" {
+			h.writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "Use contact_phone for the attendee's international phone number.",
+				"code":  "invalid_field", "field": "phone",
+			})
+			return
+		}
 	}
 	idemKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	idemDone := false
@@ -905,7 +915,7 @@ func (h *Handler) createBooking(w http.ResponseWriter, r *http.Request, schedule
 		}
 		organizer.IANATimezone = req.Timezone
 		organizer.Locale = loc.Code
-		idemDone = h.createStaffAppointment(w, r, req.StaffID, startAt.UTC(), req.DurationMinutes, organizer, idemKey)
+		idemDone = h.createStaffAppointment(w, r, req.StaffID, startAt.UTC(), req.DurationMinutes, req.Notes, organizer, idemKey)
 		return
 	}
 
@@ -1001,6 +1011,7 @@ func (h *Handler) createBooking(w http.ResponseWriter, r *http.Request, schedule
 	}
 	params := booking.CreateParams{
 		EventTypeID:   et.ID,
+		Notes:         req.Notes,
 		HostIDs:       candidates,
 		RoutingMode:   et.RoutingMode,
 		RRStrategy:    et.RRStrategy,
@@ -1496,8 +1507,13 @@ func (h *Handler) dispatchBookingConfirmation(b *booking.Booking, in bookingConf
 	}
 }
 
-// GetBooking handles GET /v1/bookings/{id} (public — accessible with just the booking ID).
+// GetBooking returns booking details to an admin or an assigned staff member.
 func (h *Handler) GetBooking(w http.ResponseWriter, r *http.Request) {
+	user, authenticated := userFromContext(r.Context())
+	if !authenticated {
+		h.writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
 	id := r.PathValue("id")
 	b, err := h.bookingSvc.Get(r.Context(), id)
 	if err != nil {
@@ -1509,7 +1525,17 @@ func (h *Handler) GetBooking(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	h.writeJSON(w, http.StatusOK, toBookingJSON(b))
+	if !user.IsAdmin && !h.userHostsBooking(r.Context(), user.ID, id) {
+		h.writeError(w, http.StatusNotFound, "booking not found")
+		return
+	}
+	items, err := h.enrichBookings(r.Context(), []booking.Booking{*b}, true)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "get booking details", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "could not load booking details")
+		return
+	}
+	h.writeJSON(w, http.StatusOK, items[0])
 }
 
 // Bookings are paginated. The list used to be unbounded: it loaded every booking the
@@ -1546,6 +1572,19 @@ func (h *Handler) parseBookingListFilter(ctx context.Context, q url.Values, user
 	if !(q.Get("scope") == "all" && user.IsAdmin) {
 		f.ViewerID = user.ID
 	}
+	if q.Has("email") {
+		var err error
+		f.AttendeeEmail, err = normalizeBookerEmail(q.Get("email"))
+		if err != nil {
+			return f, &booking.ContactError{Message: err.Error(), Code: "invalid_email", Field: "email"}
+		}
+	}
+	if q.Has("phone") {
+		if err := booking.ValidatePhone(q.Get("phone"), "phone"); err != nil {
+			return f, err
+		}
+		f.AttendeePhone = q.Get("phone")
+	}
 
 	if s := q.Get("status"); s != "" {
 		if !bookingStatuses[s] {
@@ -1554,8 +1593,8 @@ func (h *Handler) parseBookingListFilter(ctx context.Context, q url.Values, user
 		f.Status = s
 	}
 	if w := q.Get("when"); w != "" {
-		if w != "upcoming" && w != "past" {
-			return f, fmt.Errorf("when must be upcoming or past")
+		if w != "upcoming" && w != "past" && w != "future" {
+			return f, fmt.Errorf("when must be future, upcoming or past")
 		}
 		f.When = w
 	}
@@ -1618,6 +1657,9 @@ func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
 
 	f, err := h.parseBookingListFilter(r.Context(), r.URL.Query(), user)
 	switch {
+	case errors.Is(err, booking.ErrInvalidContact):
+		h.writeContactError(w, err)
+		return
 	case errors.Is(err, errNoMatches):
 		h.writeJSON(w, http.StatusOK, map[string]any{
 			"items": []bookingJSON{}, "total": 0,
@@ -1654,9 +1696,18 @@ func (h *Handler) ListBookings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	total := counts.Total()
+	switch f.When {
+	case "future":
+		total = counts.Future
+	case "upcoming":
+		total = counts.Upcoming
+	case "past":
+		total = counts.Past
+	}
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"items":  items,
-		"total":  counts.Total(),
+		"total":  total,
 		"counts": map[string]int{"upcoming": counts.Upcoming, "past": counts.Past},
 		"limit":  f.Limit,
 		"offset": f.Offset,

@@ -29,6 +29,14 @@ type scheduleWindow struct {
 	End   time.Time `json:"end_at"`
 }
 
+type scheduleDay struct {
+	Date       string `json:"date"`
+	IsDayOff   bool   `json:"is_day_off"`
+	Reason     string `json:"reason,omitempty"`
+	Notes      string `json:"notes,omitempty"`
+	OverrideID string `json:"override_id,omitempty"`
+}
+
 const maxAppointmentMinutes = 24 * 60
 
 // GetScheduleAvailability returns continuous staff working time after subtracting
@@ -46,6 +54,7 @@ func (h *Handler) GetScheduleAvailability(w http.ResponseWriter, r *http.Request
 		h.writeError(w, http.StatusBadRequest, "from and to must be RFC3339 instants spanning at most 32 days")
 		return
 	}
+	requestedFrom, requestedTo := from, to
 	if q.Has("event_type_slug") {
 		h.writeError(w, http.StatusBadRequest, "use duration_minutes instead of event_type_slug")
 		return
@@ -117,7 +126,20 @@ func (h *Handler) GetScheduleAvailability(w http.ResponseWriter, r *http.Request
 		}
 	}
 	result := make([]scheduleWindow, 0)
-	if from.Before(to) {
+	days, err := h.staffScheduleDays(ctx, staffID, config.ID, requestedFrom, requestedTo, loc)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "schedule day information", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "could not load staff days off")
+		return
+	}
+	hasWorkingDay := false
+	for _, day := range days {
+		if !day.IsDayOff {
+			hasWorkingDay = true
+			break
+		}
+	}
+	if from.Before(to) && hasWorkingDay {
 		free := []slots.Interval{{Start: from, End: to}}
 		for _, hostID := range hostIDs {
 			windows, err := h.staffWindows(ctx, hostID, from, to, config, excludeID)
@@ -139,9 +161,60 @@ func (h *Handler) GetScheduleAvailability(w http.ResponseWriter, r *http.Request
 		}
 	}
 	h.writeJSON(w, http.StatusOK, map[string]any{
-		"staff_id": staffID, "timezone": loc.String(), "windows": result,
+		"staff_id": staffID, "timezone": loc.String(), "windows": result, "days": days,
 		"duration_minutes": minutes,
 	})
+}
+
+// Day metadata uses the original working schedule. A fully booked day or a
+// full-day break must not be misreported as a day off.
+func (h *Handler) staffScheduleDays(ctx context.Context, staffID, eventTypeID string, from, to time.Time, loc *time.Location) ([]scheduleDay, error) {
+	_, rules, overrides, err := h.loadHostScheduleData(ctx, staffID, eventTypeID, false)
+	if err != nil {
+		return nil, err
+	}
+	first := from.In(loc).Format(time.DateOnly)
+	last := to.Add(-time.Nanosecond).In(loc).Format(time.DateOnly)
+	rows, err := h.db.QueryContext(ctx, `SELECT id, date, reason, notes FROM availability_overrides
+		WHERE user_id = ? AND is_available = 0 AND date BETWEEN ? AND ? ORDER BY date, id`, staffID, first, last)
+	if err != nil {
+		return nil, err
+	}
+	blocked := map[string]scheduleDay{}
+	for rows.Next() {
+		var day scheduleDay
+		if err := rows.Scan(&day.OverrideID, &day.Date, &day.Reason, &day.Notes); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		day.IsDayOff = true
+		blocked[day.Date] = day
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	start, _ := time.Parse(time.DateOnly, first)
+	end, _ := time.Parse(time.DateOnly, last)
+	days := make([]scheduleDay, 0)
+	for date := start; !date.After(end); date = date.AddDate(0, 0, 1) {
+		key := date.Format(time.DateOnly)
+		if day, exists := blocked[key]; exists {
+			days = append(days, day)
+			continue
+		}
+		working, err := slots.ResolveDayWindows(loc, date, rules, overrides)
+		if err != nil {
+			return nil, err
+		}
+		day := scheduleDay{Date: key, IsDayOff: len(working) == 0}
+		if day.IsDayOff {
+			day.Reason = "not_scheduled"
+		}
+		days = append(days, day)
+	}
+	return days, nil
 }
 
 func (h *Handler) staffTimezone(ctx context.Context, staffID string) (*time.Location, error) {
@@ -203,7 +276,7 @@ func (h *Handler) staffWindows(ctx context.Context, staffID string, from, to tim
 
 // createStaffAppointment shares contact parsing, idempotency and notifications
 // with the booking entry point while taking all timing from the appointment.
-func (h *Handler) createStaffAppointment(w http.ResponseWriter, r *http.Request, staffID string, start time.Time, minutes int, attendee booking.Attendee, idemKey string) bool {
+func (h *Handler) createStaffAppointment(w http.ResponseWriter, r *http.Request, staffID string, start time.Time, minutes int, notes string, attendee booking.Attendee, idemKey string) bool {
 	if minutes < 1 || minutes > maxAppointmentMinutes {
 		h.writeError(w, http.StatusBadRequest, "duration_minutes must be between 1 and 1440")
 		return false
@@ -224,10 +297,14 @@ func (h *Handler) createStaffAppointment(w http.ResponseWriter, r *http.Request,
 		b, err = h.bookingSvc.Create(ctx, booking.CreateParams{
 			HostIDs: []string{staffID}, StartAt: start, EndAt: end,
 			Organizer: attendee, LocationType: "in_person",
+			Notes:              notes,
 			MaxBookingsPerHour: maxBookingsPerEmailPerHour,
 		})
 	}
 	switch {
+	case errors.Is(err, booking.ErrNotesTooLong):
+		h.writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "invalid_notes", "field": "notes"})
+		return false
 	case errors.Is(err, booking.ErrDoubleBooked), errors.Is(err, errSlotUnavailable):
 		h.writeJSON(w, http.StatusConflict, map[string]string{"error": "This time is unavailable.", "code": "time_unavailable"})
 		return false

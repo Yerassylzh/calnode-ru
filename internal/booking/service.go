@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/calnode/calnode/internal/db"
 	"github.com/calnode/calnode/internal/uid"
@@ -33,6 +34,10 @@ func New(db *sql.DB) *Service {
 // The partial unique index on (host_id, start_at) acts as a secondary guard
 // for exact-start-time collisions; both paths return ErrDoubleBooked.
 func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) {
+	if utf8.RuneCountInString(p.Notes) > 5000 {
+		return nil, ErrNotesTooLong
+	}
+	p.Notes = strings.TrimSpace(p.Notes)
 	if len(p.HostIDs) == 0 {
 		return nil, fmt.Errorf("booking: HostIDs must not be empty")
 	}
@@ -174,10 +179,10 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO bookings
 		  (id, event_type_id, host_id, start_at, end_at, status, location_value, location_type,
-		   invite_delivery, created_at, updated_at)
-		VALUES (?, NULLIF(?, ''), ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`,
+		   invite_delivery, created_at, updated_at, notes)
+		VALUES (?, NULLIF(?, ''), ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?)`,
 		bookingID, p.EventTypeID, chosenHost, startStr, endStr, p.LocationValue, p.LocationType,
-		inviteDelivery, now, now)
+		inviteDelivery, now, now, p.Notes)
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return nil, ErrDoubleBooked
@@ -239,6 +244,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 	nowT, _ := time.Parse(time.RFC3339Nano, now)
 	return &Booking{
 		ManageToken:    manageToken,
+		Notes:          p.Notes,
 		ContactMethod:  p.Organizer.ContactMethod,
 		ID:             bookingID,
 		EventTypeID:    p.EventTypeID,
@@ -330,7 +336,7 @@ const bookingColumns = `id, COALESCE(event_type_id, ''), host_id, start_at, end_
 	       COALESCE(cancellation_reason, ''), COALESCE(location_value, ''),
 	       created_at, updated_at,
 	       payment_status, amount_paid_cents, amount_paid_currency, location_type,
-	       confirm_failed, invite_delivery`
+	       confirm_failed, invite_delivery, notes`
 
 // hostBusy reports whether hostID has any non-cancelled booking overlapping
 // [start, end) — the double-booking invariant every write path (Create, Reschedule,
@@ -361,6 +367,18 @@ func hostBusy(ctx context.Context, tx *sql.Tx, hostID, start, end, excludeBookin
 	return hostOnBreak(ctx, tx, hostID, start, end)
 }
 
+// CheckDayOffConflict checks appointments in the transaction that creates time off.
+// Routine breaks do not prevent taking a whole day off.
+func CheckDayOffConflict(ctx context.Context, tx *sql.Tx, hostID string, start, end time.Time) (bool, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM bookings b
+		WHERE b.status != 'cancelled' AND b.start_at < ? AND b.end_at > ?
+		  AND (b.host_id = ? OR EXISTS (
+		    SELECT 1 FROM booking_hosts bh WHERE bh.booking_id = b.id AND bh.user_id = ?
+		  ))`, end.UTC().Format(time.RFC3339Nano), start.UTC().Format(time.RFC3339Nano), hostID, hostID).Scan(&count)
+	return count > 0, err
+}
+
 // CheckBreakConflict uses the same transaction as the break insertion so a
 // booking and a break cannot both reserve the same staff member's time.
 func CheckBreakConflict(ctx context.Context, tx *sql.Tx, hostID string, start, end time.Time) (bool, error) {
@@ -384,7 +402,12 @@ func hostOnBreak(ctx context.Context, tx *sql.Tx, hostID, start, end string) (bo
 	if err != nil {
 		return false, err
 	}
-	fromDate, toDate := from.In(loc).Format(time.DateOnly), to.In(loc).Format(time.DateOnly)
+	fromDate, toDate := from.In(loc).Format(time.DateOnly), to.Add(-time.Nanosecond).In(loc).Format(time.DateOnly)
+	var blocked int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM availability_overrides
+		WHERE user_id = ? AND is_available = 0 AND date BETWEEN ? AND ?`, hostID, fromDate, toDate).Scan(&blocked); err != nil || blocked > 0 {
+		return blocked > 0, err
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT COALESCE(date, ''), COALESCE(day_of_week, -1), start_time, end_time
 		FROM doctor_breaks WHERE user_id = ? AND (kind = 'weekly' OR date BETWEEN ? AND ?)`, hostID, fromDate, toDate)
@@ -768,7 +791,7 @@ func scanBooking(s scanner) (*Booking, error) {
 		&b.CancellationReason, &b.LocationValue,
 		&createdStr, &updatedStr,
 		&b.PaymentStatus, &b.AmountPaidCents, &b.AmountPaidCurrency, &b.LocationType,
-		&confirmFailed, &b.InviteDelivery,
+		&confirmFailed, &b.InviteDelivery, &b.Notes,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound

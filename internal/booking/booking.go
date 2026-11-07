@@ -8,6 +8,7 @@ import (
 var (
 	ErrDoubleBooked        = errors.New("booking: time slot is no longer available")
 	ErrNotFound            = errors.New("booking: not found")
+	ErrNotesTooLong        = errors.New("notes must be at most 5000 characters")
 	ErrAlreadyCancelled    = errors.New("booking: already cancelled")
 	ErrTokenNotFound       = errors.New("booking: manage token not found or expired")
 	ErrBookingLimitReached = errors.New("booking: active booking limit reached for this invitee")
@@ -31,6 +32,7 @@ type Booking struct {
 	// ManageToken is returned only by Create, never loaded by public lookup.
 	ManageToken        string
 	ContactMethod      string
+	Notes              string
 	ID                 string
 	EventTypeID        string
 	HostID             string
@@ -75,6 +77,7 @@ type Answer struct {
 // CreateParams is the input to Service.Create.
 type CreateParams struct {
 	EventTypeID string
+	Notes       string
 	// HostIDs are the candidate hosts. For RoutingMode "round_robin" Create picks
 	// ONE free candidate (least-loaded for this event type; the slice order breaks
 	// ties). For any other mode every candidate must be free and host_id is set to

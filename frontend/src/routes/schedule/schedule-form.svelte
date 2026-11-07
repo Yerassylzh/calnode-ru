@@ -1,29 +1,31 @@
 <script lang="ts">
 	import { parseAbsolute, parseDate, parseDateTime, toZoned } from '@internationalized/date';
 	import { CalendarDays, Clock3, Mail, MapPin, Phone, UserRound } from '@lucide/svelte';
-	import { api, type Booking, type DoctorBreak } from '$lib/api';
+	import { api, type Booking, type DoctorBreak, type ScheduleDay } from '$lib/api';
 	import { localeTag, t } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import { Label } from '$lib/components/ui/label';
 	import { DatePicker } from '$lib/components/ui/date-picker';
 	import * as Select from '$lib/components/ui/select';
 	import TimePicker from './time-picker.svelte';
 
 	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, onSaved, onDismiss }: {
-		kind: 'booking' | 'break' | 'details' | 'removeBreak';
+		kind: 'booking' | 'break' | 'details' | 'removeBreak' | 'dayOff' | 'removeDayOff';
 		staffID: string;
 		staffName: string;
 		timezone: string;
 		initialDate: string;
 		initialTime: string;
-		target?: Booking | DoctorBreak;
+		target?: Booking | DoctorBreak | ScheduleDay;
 		onSaved: () => void;
 		onDismiss: () => void;
 	} = $props();
 
 	const appointment = $derived(target && 'start_at' in target ? target : undefined);
 	const breakItem = $derived(target && 'start_time' in target ? target : undefined);
+	const dayOff = $derived(target && 'is_day_off' in target ? target : undefined);
 	const attendee = $derived(appointment?.attendees[0]);
 	let date = $state('');
 	let start = $state('');
@@ -31,6 +33,7 @@
 	let title = $state('');
 	let duration = $state<number | undefined>(20);
 	let name = $state('');
+	let notes = $state('');
 	let contactMethod = $state<'phone' | 'email'>('email');
 	let contact = $state('');
 	let editing = $state(false);
@@ -40,6 +43,7 @@
 	let lastPayload = '';
 	let idempotencyKey = '';
 	let freeWindows = $state<{ start_at: string; end_at: string }[]>([]);
+	let availabilityDayOff = $state<ScheduleDay>();
 	let availabilityLoading = $state(false);
 	let availabilityError = $state('');
 	let availabilityVersion = $state(0);
@@ -71,6 +75,7 @@
 		availabilityVersion;
 		if (!needsAvailability || !date || !Number.isInteger(appointmentMinutes) || !appointmentMinutes || appointmentMinutes < 1 || appointmentMinutes > 1440) {
 			freeWindows = [];
+			availabilityDayOff = undefined;
 			availabilityLoading = false;
 			availabilityError = '';
 			return;
@@ -85,10 +90,16 @@
 		if (kind === 'details' && appointment) query.set('exclude_booking_id', appointment.id);
 		let current = true;
 		freeWindows = [];
+		availabilityDayOff = undefined;
 		availabilityLoading = true;
 		availabilityError = '';
-		api.get<{ windows: { start_at: string; end_at: string }[] }>('/v1/schedule/availability?' + query)
-			.then((response) => { if (current) freeWindows = response.windows; })
+		api.get<{ windows: { start_at: string; end_at: string }[]; days?: ScheduleDay[] }>('/v1/schedule/availability?' + query)
+			.then((response) => {
+				if (current) {
+					freeWindows = response.windows;
+					availabilityDayOff = response.days?.find((day) => day.date === date && day.is_day_off);
+				}
+			})
 			.catch((failure) => { if (current) availabilityError = failure instanceof Error ? failure.message : $t('schedule.loadFailed'); })
 			.finally(() => { if (current) availabilityLoading = false; });
 		return () => { current = false; };
@@ -145,7 +156,11 @@
 		saving = true;
 		error = '';
 		try {
-			if (kind === 'break') {
+			if (kind === 'dayOff') {
+				await api.post('/v1/availability-overrides', { user_id: staffID, date, reason: 'day_off', notes: notes.trim() || undefined });
+			} else if (kind === 'removeDayOff' && dayOff?.override_id) {
+				await api.del('/v1/availability-overrides/' + encodeURIComponent(dayOff.override_id));
+			} else if (kind === 'break') {
 				await api.post('/v1/doctor-breaks', {
 					user_id: staffID, kind: 'date', date, start_time: start, end_time: end,
 					title: title.trim() || $t('doctorBreaks.defaultTitle')
@@ -157,6 +172,7 @@
 			} else if (kind === 'booking') {
 				const payload = {
 					staff_id: staffID, start_at: startAt(), duration_minutes: duration,
+					notes: notes.trim() || undefined,
 					name: name.trim(), contact_method: contactMethod, language: $localeTag, timezone,
 					email: contactMethod === 'email' ? contact.trim() : undefined,
 					contact_phone: contactMethod === 'phone' ? contact.trim() : undefined
@@ -205,6 +221,18 @@
 					{#if appointment.location_value}<div class="flex items-start gap-2.5 break-words text-sm"><MapPin class="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{appointment.location_value}</span></div>{/if}
 				</div>
 			{/if}
+			{#if !editing && appointment.notes}
+				<div class="space-y-2">
+					<p class="text-sm font-medium">{$t('schedule.notes')}</p>
+					<p class="whitespace-pre-wrap break-words rounded-xl border bg-muted/15 p-4 text-sm">{appointment.notes}</p>
+				</div>
+			{/if}
+		{:else if kind === 'removeDayOff' && dayOff}
+			<div class="space-y-3 rounded-xl border bg-muted/15 p-4 text-sm">
+				<p class="font-medium">{parseDate(dayOff.date).toDate('UTC').toLocaleDateString($localeTag, { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+				{#if dayOff.notes}<p class="whitespace-pre-wrap break-words text-muted-foreground">{dayOff.notes}</p>{/if}
+			</div>
+			<p class="text-sm text-muted-foreground">{$t('schedule.removeDayOffHelp')}</p>
 		{:else if kind === 'removeBreak' && breakItem}
 			<div class="rounded-xl border bg-muted/15 p-4">
 				<p class="font-medium">{breakItem.title}</p>
@@ -233,7 +261,9 @@
 				</div>
 				<div class="space-y-2">
 					<Label for="schedule-contact">{$t(contactMethod === 'email' ? 'schedule.email' : 'schedule.phone')}</Label>
-					<Input id="schedule-contact" class="h-11 bg-muted/15 shadow-xs" type={contactMethod === 'email' ? 'email' : 'tel'} bind:value={contact} required />
+					<Input id="schedule-contact" class="h-11 bg-muted/15 shadow-xs" type={contactMethod === 'email' ? 'email' : 'tel'} bind:value={contact}
+						pattern={contactMethod === 'phone' ? '\\+[1-9][0-9]{6,14}' : undefined}
+						placeholder={contactMethod === 'phone' ? '+77011234567' : undefined} required />
 				</div>
 			</div>
 		{/if}
@@ -269,6 +299,12 @@
 				</div>
 			{/if}
 		{/if}
+		{#if kind === 'dayOff'}
+			<div class="space-y-2">
+				<Label for="schedule-day-off-date">{$t('schedule.date')}</Label>
+				<DatePicker id="schedule-day-off-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone} class="h-11 w-full bg-muted/15 shadow-xs" />
+			</div>
+		{/if}
 		{#if needsAvailability}
 			{#if availabilityLoading}
 				<p role="status" class="text-sm text-muted-foreground">{$t('schedule.checkingAvailability')}</p>
@@ -277,11 +313,19 @@
 					<span>{availabilityError}</span>
 					<Button type="button" variant="outline" size="sm" onclick={() => availabilityVersion++}>{$t('common.retry')}</Button>
 				</div>
+			{:else if availabilityDayOff}
+				<p role="status" class="break-words text-sm text-muted-foreground">{$t('schedule.dayOff')}{#if availabilityDayOff.notes} · {availabilityDayOff.notes}{/if}</p>
 			{:else if !timeAvailable && /^([01]\d|2[0-3]):[0-5]\d$/.test(start)}
 				<p role="status" class="text-sm text-muted-foreground">{$t('schedule.timeUnavailable')}</p>
 			{/if}
 		{/if}
 		{#if confirmingCancel}<p class="rounded-lg bg-destructive/5 p-3 text-sm text-destructive">{$t('schedule.cancelHelp')}</p>{/if}
+		{#if kind === 'booking' || kind === 'dayOff'}
+			<div class="space-y-2">
+				<Label for="schedule-notes">{$t(kind === 'dayOff' ? 'schedule.dayOffReason' : 'schedule.notes')} <span class="font-normal text-muted-foreground">{$t('common.optional')}</span></Label>
+				<Textarea id="schedule-notes" bind:value={notes} rows={3} maxlength={5000} class="resize-y bg-muted/15 shadow-xs" />
+			</div>
+		{/if}
 		{#if error}<p role="alert" class="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>{/if}
 	</div>
 
@@ -301,8 +345,8 @@
 			{/if}
 		{:else}
 			<Button variant="outline" type="button" disabled={saving} onclick={() => { if (editing) { editing = false; error = ''; } else onDismiss(); }}>{$t('common.cancel')}</Button>
-			<Button type="submit" variant={kind === 'removeBreak' ? 'destructive' : 'default'} disabled={saving || (needsAvailability && !timeAvailable)}>
-				{$t(saving ? 'common.saving' : kind === 'removeBreak' ? 'common.delete' : kind === 'booking' ? 'schedule.newBooking' : 'common.save')}
+			<Button type="submit" variant={kind === 'removeBreak' || kind === 'removeDayOff' ? 'destructive' : 'default'} disabled={saving || (needsAvailability && !timeAvailable)}>
+				{$t(saving ? 'common.saving' : kind === 'removeBreak' || kind === 'removeDayOff' ? 'common.delete' : kind === 'booking' ? 'schedule.newBooking' : 'common.save')}
 			</Button>
 		{/if}
 	</div>

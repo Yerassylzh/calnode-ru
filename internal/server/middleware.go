@@ -202,37 +202,12 @@ func PublicCORS(allowedOrigins []string) func(http.HandlerFunc) http.HandlerFunc
 	}
 }
 
-// RateLimit returns middleware that allows limit requests per period per remote IP.
-// Exceeding the limit returns 429 with a Retry-After header. The IP is the TCP remote
-// address only — see remoteIP for why proxy headers are never trusted here.
-//
-// The body is deliberately fixed English, even though the public booking form renders it
-// verbatim in its error slot. Translating it needs a locale, which this middleware has no
-// good source for (no DB, so no operator fallback-locale, and these requests carry no
-// ?lang=) — and RateLimit also guards login/token/invite/avatar/settings, where a
-// translated body would put a stray non-English string into the untranslated admin SPA and
-// make machine consumers' 429s vary by Accept-Language. A split constructor to thread a
-// locale through only the public limiters was tried and reverted: too much shared-middleware
-// surface for one string on an abuse path a booker reaches only by hammering the endpoint.
-func RateLimit(limit int, period time.Duration) func(http.HandlerFunc) http.HandlerFunc {
-	rl := &rateLimiter{
-		windows: make(map[string]*rlWindow),
-		limit:   limit,
-		period:  period,
-	}
-	go rl.cleanup()
+// RateLimit is a no-op passthrough — rate limiting is disabled.
+// All requests are forwarded directly to the next handler regardless of
+// the limit/period arguments (kept for call-site compatibility).
+func RateLimit(_ int, _ time.Duration) func(http.HandlerFunc) http.HandlerFunc {
 	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			ip := remoteIP(r)
-			if !rl.allow(ip) {
-				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(period.Seconds())))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				fmt.Fprint(w, `{"error":"rate limit exceeded"}`)
-				return
-			}
-			next(w, r)
-		}
+		return next
 	}
 }
 

@@ -21,9 +21,11 @@ type ListFilter struct {
 	// workspace; callers MUST gate that on the admin role.
 	ViewerID string
 
-	EventTypeID string // event_types.id, not the slug
-	HostID      string // a specific host, resolved the same way ViewerID is
-	TeamID      string // any member of this team hosts the booking
+	EventTypeID   string // event_types.id, not the slug
+	HostID        string // a specific host, resolved the same way ViewerID is
+	TeamID        string // any member of this team hosts the booking
+	AttendeeEmail string
+	AttendeePhone string
 
 	// Status matches exactly when set. When empty, cancelled bookings are excluded:
 	// that is the default every existing caller depends on, and it is why passing an
@@ -33,8 +35,8 @@ type ListFilter struct {
 	From time.Time // start_at >= From
 	To   time.Time // start_at <  To
 
-	// When is "upcoming" or "past", keyed on end_at rather than start_at so a meeting
-	// that has begun but not finished still counts as upcoming. Needs Now set.
+	// "future" requires a start after Now. "upcoming" also includes ongoing bookings.
+	// "past" matches bookings that have ended. Needs Now set.
 	When string
 	Now  time.Time
 
@@ -52,6 +54,7 @@ type ListFilter struct {
 type Counts struct {
 	Upcoming int
 	Past     int
+	Future   int
 }
 
 // Total is every booking matching the filter, on both sides of now.
@@ -118,6 +121,18 @@ func (f ListFilter) where(includeWhen bool) (string, []any) {
 		conds = append(conds, "bookings.event_type_id = ?")
 		args = append(args, f.EventTypeID)
 	}
+	if f.AttendeeEmail != "" || f.AttendeePhone != "" {
+		contact := []string{"a.booking_id = bookings.id", "a.is_organizer = 1"}
+		if f.AttendeeEmail != "" {
+			contact = append(contact, "a.email = ? COLLATE NOCASE")
+			args = append(args, f.AttendeeEmail)
+		}
+		if f.AttendeePhone != "" {
+			contact = append(contact, "a.phone = ?")
+			args = append(args, f.AttendeePhone)
+		}
+		conds = append(conds, "EXISTS (SELECT 1 FROM booking_attendees a WHERE "+strings.Join(contact, " AND ")+")")
+	}
 	if !f.From.IsZero() {
 		conds = append(conds, "bookings.start_at >= ?")
 		args = append(args, sqlTime(f.From))
@@ -128,6 +143,8 @@ func (f ListFilter) where(includeWhen bool) (string, []any) {
 	}
 	if includeWhen && f.When != "" && !f.Now.IsZero() {
 		switch f.When {
+		case "future":
+			conds = append(conds, "bookings.start_at > ?")
 		case "past":
 			conds = append(conds, "bookings.end_at < ?")
 		default: // "upcoming"
@@ -188,14 +205,15 @@ func (s *Service) Counts(ctx context.Context, f ListFilter) (Counts, error) {
 	}
 	q := `SELECT
 		    COALESCE(SUM(CASE WHEN end_at >= ? THEN 1 ELSE 0 END), 0),
-		    COALESCE(SUM(CASE WHEN end_at <  ? THEN 1 ELSE 0 END), 0)
+		    COALESCE(SUM(CASE WHEN end_at <  ? THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN start_at > ? THEN 1 ELSE 0 END), 0)
 		FROM bookings
 		` + whereSQL //#nosec G202 -- whereSQL is assembled from literal fragments only; every value is bound via args
 
 	nowStr := sqlTime(now)
 	var c Counts
-	err := s.db.QueryRowContext(ctx, q, append([]any{nowStr, nowStr}, args...)...).
-		Scan(&c.Upcoming, &c.Past)
+	err := s.db.QueryRowContext(ctx, q, append([]any{nowStr, nowStr, nowStr}, args...)...).
+		Scan(&c.Upcoming, &c.Past, &c.Future)
 	if err != nil {
 		return Counts{}, fmt.Errorf("booking: counts: %w", err)
 	}

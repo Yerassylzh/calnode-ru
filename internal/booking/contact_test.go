@@ -16,7 +16,11 @@ func TestNormalizeContact(t *testing.T) {
 		phone, method string
 		valid         bool
 	}{
-		{"phone default", booking.Attendee{Name: "Alex", Phone: "+7 (701) 123-45-67"}, "+77011234567", "phone", true},
+		{"phone default", booking.Attendee{Name: "Alex", Phone: "+77011234567"}, "+77011234567", "phone", true},
+		{"formatted number rejected", booking.Attendee{Name: "Alex", Phone: "+7 (701) 123-45-67"}, "", "", false},
+		{"surrounding whitespace rejected", booking.Attendee{Name: "Alex", Phone: " +77011234567 "}, "", "", false},
+		{"international prefix rejected", booking.Attendee{Name: "Alex", Phone: "0077011234567"}, "", "", false},
+		{"zero country code rejected", booking.Attendee{Name: "Alex", Phone: "+07011234567"}, "", "", false},
 		{"email legacy", booking.Attendee{Name: "Alex", Email: "Alex <Alex@example.com>"}, "", "email", true},
 		{"both default phone", booking.Attendee{Name: "Alex", Email: "alex@example.com", Phone: "+77011234567"}, "+77011234567", "phone", true},
 		{"explicit email", booking.Attendee{Name: "Alex", ContactMethod: "email", Email: "alex@example.com", Phone: "+77011234567"}, "+77011234567", "email", true},
@@ -49,7 +53,7 @@ func TestPhoneContactLimitsAndPolicy(t *testing.T) {
 	event := seedEventType(t, database, host)
 	svc := booking.New(database)
 	start := time.Now().UTC().Add(24 * time.Hour)
-	params := booking.CreateParams{EventTypeID: event, HostIDs: []string{host}, StartAt: start, EndAt: start.Add(30 * time.Minute), MaxActivePerInvitee: 1, Organizer: booking.Attendee{Name: "Alex", Phone: "+7 (701) 1234567"}}
+	params := booking.CreateParams{EventTypeID: event, HostIDs: []string{host}, StartAt: start, EndAt: start.Add(30 * time.Minute), MaxActivePerInvitee: 1, Organizer: booking.Attendee{Name: "Alex", Phone: "+77011234567"}}
 	b, err := svc.Create(context.Background(), params)
 	if err != nil {
 		t.Fatal(err)

@@ -424,7 +424,7 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 	createAppointment := bookingRL(h.RequireAuth(h.CreateScheduleBooking))
 	mux.HandleFunc("POST /v1/bookings", createAppointment)
 	mux.HandleFunc("POST /v1/schedule/bookings", createAppointment)
-	mux.HandleFunc("GET /v1/bookings/{id}", bookingRL(h.GetBooking))
+	mux.HandleFunc("GET /v1/bookings/{id}", bookingRL(h.RequireAuth(h.GetBooking)))
 	mux.HandleFunc("GET /v1/bookings", h.RequireAuth(h.ListBookings))
 	mux.HandleFunc("POST /v1/bookings/{id}/cancel", h.RequireAuth(h.CancelBooking))
 	mux.HandleFunc("PATCH /v1/bookings/{id}/reschedule", h.RequireAuth(h.RescheduleBooking))
