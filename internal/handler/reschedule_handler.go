@@ -10,8 +10,9 @@ import (
 )
 
 // RescheduleBooking handles PATCH /v1/bookings/{id}/reschedule (admin or primary host).
-// Body: {"start_at":"<RFC3339>"}
-// The appointment's existing duration is preserved.
+// Body: {"start_at":"<RFC3339>", "end_at":"<RFC3339>"(optional)}
+// Without end_at the appointment's existing duration is preserved; with it the
+// manager sets the exact start and end (so the duration may change too).
 func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromContext(r.Context())
 	id := r.PathValue("id")
@@ -19,6 +20,7 @@ func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		StartAt string `json:"start_at"`
+		EndAt   string `json:"end_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.StartAt == "" {
 		h.writeError(w, http.StatusBadRequest, "start_at is required")
@@ -54,6 +56,18 @@ func (h *Handler) RescheduleBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newEnd := newStart.Add(b.EndAt.Sub(b.StartAt))
+	if req.EndAt != "" {
+		e, err := time.Parse(time.RFC3339, req.EndAt)
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, "end_at must be RFC3339 (e.g. 2026-06-15T09:30:00Z)")
+			return
+		}
+		if !e.After(newStart) {
+			h.writeError(w, http.StatusBadRequest, "end_at must be after start_at")
+			return
+		}
+		newEnd = e
+	}
 
 	if err := h.validateRescheduleTime(r.Context(), id, b.EventTypeID, b.HostID, newStart, newEnd, true); err != nil {
 		if errors.Is(err, errSlotUnavailable) {

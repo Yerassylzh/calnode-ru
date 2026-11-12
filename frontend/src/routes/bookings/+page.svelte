@@ -9,7 +9,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Select from '$lib/components/ui/select';
 	import { Input } from '$lib/components/ui/input';
-	import { parseDateTime, toZoned } from '@internationalized/date';
+	import { parseDateTime, toZoned, fromDate } from '@internationalized/date';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
 
 	let items: Booking[] = $state([]);
@@ -45,6 +45,7 @@
 	let reschedulingId = $state<string | null>(null);
 	let rescheduleDate = $state('');
 	let rescheduleTime = $state('');
+	let rescheduleEndTime = $state('');
 	let rescheduling = $state(false);
 	let rescheduleError = $state('');
 
@@ -209,8 +210,14 @@
 
 	function startReschedule(b: Booking) {
 		reschedulingId = b.id;
-		rescheduleDate = '';
-		rescheduleTime = '';
+		// Prefill with the current times (in the viewer's timezone) so a manager
+		// can nudge just the start or just the end.
+		const s = fromDate(new Date(b.start_at), $prefs.timezone);
+		const e = fromDate(new Date(b.end_at), $prefs.timezone);
+		const hm = (z: typeof s) => `${String(z.hour).padStart(2, '0')}:${String(z.minute).padStart(2, '0')}`;
+		rescheduleDate = s.toString().slice(0, 10);
+		rescheduleTime = hm(s);
+		rescheduleEndTime = hm(e);
 		rescheduleError = '';
 	}
 
@@ -219,11 +226,14 @@
 	}
 
 	async function confirmReschedule() {
-		if (!rescheduleDate || !rescheduleTime || !reschedulingId) return;
+		if (!rescheduleDate || !rescheduleTime || !rescheduleEndTime || !reschedulingId) return;
 		rescheduling = true;
 		rescheduleError = '';
 		try {
-			await api.patch(`/v1/bookings/${reschedulingId}/reschedule`, { start_at: toZoned(parseDateTime(rescheduleDate + 'T' + rescheduleTime), $prefs.timezone, 'reject').toDate().toISOString() });
+			await api.patch(`/v1/bookings/${reschedulingId}/reschedule`, {
+				start_at: toZoned(parseDateTime(rescheduleDate + 'T' + rescheduleTime), $prefs.timezone, 'reject').toDate().toISOString(),
+				end_at: toZoned(parseDateTime(rescheduleDate + 'T' + rescheduleEndTime), $prefs.timezone, 'reject').toDate().toISOString()
+			});
 			reschedulingId = null;
 			await load();
 		} catch (e: any) {
@@ -553,7 +563,11 @@
 											<span>{$t('schedule.start')} · {$prefs.timezone}</span>
 											<Input type="time" bind:value={rescheduleTime} />
 										</label>
-										<Button onclick={confirmReschedule} disabled={rescheduling || !rescheduleDate || !rescheduleTime}>
+										<label class="space-y-1 text-sm">
+											<span>{$t('schedule.end')} · {$prefs.timezone}</span>
+											<Input type="time" bind:value={rescheduleEndTime} />
+										</label>
+										<Button onclick={confirmReschedule} disabled={rescheduling || !rescheduleDate || !rescheduleTime || !rescheduleEndTime}>
 											{$t(rescheduling ? 'common.saving' : 'common.save')}
 										</Button>
 									</div>

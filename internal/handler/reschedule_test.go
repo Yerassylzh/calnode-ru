@@ -358,3 +358,40 @@ func TestRescheduleBooking_sameTime(t *testing.T) {
 		t.Errorf("same time reschedule: got %d; want 200", rec.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Explicit end_at → duration changes; end before start → 400
+// ---------------------------------------------------------------------------
+
+func TestRescheduleBooking_explicitEnd(t *testing.T) {
+	h, database, key, _ := setupWorkspaceWithDB(t)
+	slug, _ := seedEventTypeHTTP(t, h, key)
+	start := futureAt(10, 10, 0)
+	bookingID := createBookingViaHTTP(t, h, slug, start.Format(time.RFC3339))
+
+	patch := func(startAt, endAt string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"start_at":%q,"end_at":%q}`, startAt, endAt)
+		req := authReq(http.MethodPatch, "/v1/bookings/"+bookingID+"/reschedule", body, key)
+		req.SetPathValue("id", bookingID)
+		rec := httptest.NewRecorder()
+		h.RequireAuth(h.RescheduleBooking)(rec, req)
+		return rec
+	}
+
+	if rec := patch(start.Format(time.RFC3339), start.Add(-time.Minute).Format(time.RFC3339)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("end before start: got %d; want 400", rec.Code)
+	}
+
+	newEnd := start.Add(10 * time.Minute)
+	if rec := patch(start.Format(time.RFC3339), newEnd.Format(time.RFC3339)); rec.Code != http.StatusOK {
+		t.Fatalf("explicit end: got %d; want 200: %s", rec.Code, rec.Body.String())
+	}
+	var endStr string
+	if err := database.QueryRow(`SELECT end_at FROM bookings WHERE id = ?`, bookingID).Scan(&endStr); err != nil {
+		t.Fatal(err)
+	}
+	got, err := time.Parse(time.RFC3339Nano, endStr)
+	if err != nil || !got.Equal(newEnd) {
+		t.Errorf("end_at = %q; want %v", endStr, newEnd)
+	}
+}
