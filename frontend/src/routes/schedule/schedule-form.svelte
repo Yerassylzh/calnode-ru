@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { parseAbsolute, parseDate, parseDateTime, toZoned } from '@internationalized/date';
 	import { CalendarDays, Clock3, Mail, MapPin, Phone, UserRound } from '@lucide/svelte';
 	import { api, type Booking, type DoctorBreak, type ScheduleDay } from '$lib/api';
@@ -48,8 +49,15 @@
 	let availabilityError = $state('');
 	let availabilityVersion = $state(0);
 	const needsAvailability = $derived(kind === 'booking' || (kind === 'details' && editing));
+	const clockRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+	const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+	const toClock = (minutes: number) => [Math.floor(minutes / 60), minutes % 60].map((part) => String(part).padStart(2, '0')).join(':');
+	// While editing an appointment the length is whatever start..end the manager
+	// picked, so the free-window check below runs against the new length.
+	const editedMinutes = $derived(clockRe.test(start) && clockRe.test(end) ? toMinutes(end) - toMinutes(start) : 0);
+	const endValid = $derived(!(kind === 'details' && editing) || editedMinutes > 0);
 	const appointmentMinutes = $derived(kind === 'details' && appointment
-		? Math.ceil((Date.parse(appointment.end_at) - Date.parse(appointment.start_at)) / 60000)
+		? (editing && editedMinutes > 0 ? editedMinutes : Math.ceil((Date.parse(appointment.end_at) - Date.parse(appointment.start_at)) / 60000))
 		: duration);
 	const allowedStarts = $derived.by(() => {
 		if (!needsAvailability) return undefined;
@@ -110,14 +118,32 @@
 			const local = parseAbsolute(appointment.start_at, timezone);
 			date = local.toString().slice(0, 10);
 			start = [local.hour, local.minute].map((value) => String(value).padStart(2, '0')).join(':');
+			const localEnd = parseAbsolute(appointment.end_at, timezone);
+			// An end on a later calendar day can't be shown on one date; clamp to 23:59.
+			end = localEnd.toString().slice(0, 10) === date
+				? [localEnd.hour, localEnd.minute].map((value) => String(value).padStart(2, '0')).join(':')
+				: '23:59';
 		} else {
 			date = initialDate;
 			start = initialTime;
+			const [hour, minute] = initialTime.split(':').map(Number);
+			const endMinutes = Math.min(1439, hour * 60 + minute + 30);
+			end = [Math.floor(endMinutes / 60), endMinutes % 60].map((value) => String(value).padStart(2, '0')).join(':');
 		}
-		const [hour, minute] = initialTime.split(':').map(Number);
-		const endMinutes = Math.min(1439, hour * 60 + minute + 30);
-		end = [Math.floor(endMinutes / 60), endMinutes % 60].map((value) => String(value).padStart(2, '0')).join(':');
 		error = '';
+	});
+
+	// Moving the start while editing carries the end with it, so the length is
+	// kept until the manager edits the end themselves.
+	let prevStart = '';
+	$effect(() => {
+		const next = start;
+		if (kind === 'details' && editing && clockRe.test(next) && clockRe.test(prevStart)) {
+			untrack(() => {
+				if (clockRe.test(end)) end = toClock(Math.max(0, Math.min(1439, toMinutes(end) + toMinutes(next) - toMinutes(prevStart))));
+			});
+		}
+		prevStart = next;
 	});
 
 	function formatDate(iso: string) {
@@ -130,6 +156,10 @@
 
 	function startAt() {
 		return toZoned(parseDateTime(date + 'T' + start), timezone, 'reject').toDate().toISOString();
+	}
+
+	function endAt() {
+		return toZoned(parseDateTime(date + 'T' + end), timezone, 'reject').toDate().toISOString();
 	}
 
 	async function cancelAppointment() {
@@ -149,6 +179,10 @@
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
 		if (saving) return;
+		if (!endValid) {
+			error = $t('schedule.endBeforeStart');
+			return;
+		}
 		if (needsAvailability && !timeAvailable) {
 			error = $t('schedule.timeUnavailable');
 			return;
@@ -168,7 +202,7 @@
 			} else if (kind === 'removeBreak' && breakItem) {
 				await api.del('/v1/doctor-breaks/' + encodeURIComponent(breakItem.id));
 			} else if (kind === 'details' && appointment && editing) {
-				await api.patch('/v1/bookings/' + encodeURIComponent(appointment.id) + '/reschedule', { start_at: startAt() });
+				await api.patch('/v1/bookings/' + encodeURIComponent(appointment.id) + '/reschedule', { start_at: startAt(), end_at: endAt() });
 			} else if (kind === 'booking') {
 				const payload = {
 					staff_id: staffID, start_at: startAt(), duration_minutes: duration,
@@ -269,7 +303,7 @@
 		{/if}
 
 		{#if kind === 'booking' || kind === 'break' || (kind === 'details' && editing)}
-			<div class="grid gap-4 {kind === 'booking' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}">
+			<div class="grid gap-4 {kind === 'booking' ? 'sm:grid-cols-3' : kind === 'details' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}">
 				<div class="space-y-2">
 					<Label for="schedule-date">{$t('schedule.date')}</Label>
 					<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone}
@@ -279,6 +313,12 @@
 					<Label for="schedule-start">{$t('schedule.start')}</Label>
 					<TimePicker id="schedule-start" label={$t('schedule.start')} bind:value={start} allowedMinutes={allowedStarts} />
 				</div>
+				{#if kind === 'details'}
+					<div class="space-y-2">
+						<Label for="schedule-edit-end">{$t('schedule.end')}</Label>
+						<TimePicker id="schedule-edit-end" label={$t('schedule.end')} bind:value={end} />
+					</div>
+				{/if}
 				{#if kind === 'booking'}
 					<div class="space-y-2">
 						<Label for="schedule-duration">{$t('schedule.duration')}</Label>
@@ -345,7 +385,7 @@
 			{/if}
 		{:else}
 			<Button variant="outline" type="button" disabled={saving} onclick={() => { if (editing) { editing = false; error = ''; } else onDismiss(); }}>{$t('common.cancel')}</Button>
-			<Button type="submit" variant={kind === 'removeBreak' || kind === 'removeDayOff' ? 'destructive' : 'default'} disabled={saving || (needsAvailability && !timeAvailable)}>
+			<Button type="submit" variant={kind === 'removeBreak' || kind === 'removeDayOff' ? 'destructive' : 'default'} disabled={saving || !endValid || (needsAvailability && !timeAvailable)}>
 				{$t(saving ? 'common.saving' : kind === 'removeBreak' || kind === 'removeDayOff' ? 'common.delete' : kind === 'booking' ? 'schedule.newBooking' : 'common.save')}
 			</Button>
 		{/if}

@@ -44,6 +44,7 @@ export const en: Record<string, CatalogEntry> = {
 	'schedule.noStaff': 'No staff members available.',
 	'schedule.loadFailed': 'Could not load the calendar.',
 	'schedule.invalidTime': 'Choose a valid time in the staff member’s timezone.',
+	'schedule.endBeforeStart': 'The end time must be after the start time.',
 	'schedule.saved': 'Calendar updated.',
 };
 
@@ -91,5 +92,6 @@ export const ru: Record<string, CatalogEntry> = {
 	'schedule.noStaff': 'Нет доступных сотрудников.',
 	'schedule.loadFailed': 'Не удалось загрузить календарь.',
 	'schedule.invalidTime': 'Выберите допустимое время в часовом поясе сотрудника.',
+	'schedule.endBeforeStart': 'Время окончания должно быть позже времени начала.',
 	'schedule.saved': 'Календарь обновлён.',
 };
