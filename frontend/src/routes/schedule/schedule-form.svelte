@@ -37,7 +37,6 @@
 	let notes = $state('');
 	let contactMethod = $state<'phone' | 'email'>('email');
 	let contact = $state('');
-	let editing = $state(false);
 	let confirmingCancel = $state(false);
 	let saving = $state(false);
 	let error = $state('');
@@ -48,6 +47,8 @@
 	let availabilityLoading = $state(false);
 	let availabilityError = $state('');
 	let availabilityVersion = $state(0);
+	// An active appointment opens straight into its edit form - no 'Reschedule' step.
+	const editing = $derived(kind === 'details' && !!appointment && appointment.status !== 'cancelled');
 	const needsAvailability = $derived(kind === 'booking' || (kind === 'details' && editing));
 	const clockRe = /^([01]\d|2[0-3]):[0-5]\d$/;
 	const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
@@ -118,6 +119,7 @@
 			const local = parseAbsolute(appointment.start_at, timezone);
 			date = local.toString().slice(0, 10);
 			start = [local.hour, local.minute].map((value) => String(value).padStart(2, '0')).join(':');
+			notes = appointment.notes ?? '';
 			const localEnd = parseAbsolute(appointment.end_at, timezone);
 			// An end on a later calendar day can't be shown on one date; clamp to 23:59.
 			end = localEnd.toString().slice(0, 10) === date
@@ -158,6 +160,19 @@
 		return toZoned(parseDateTime(date + 'T' + start), timezone, 'reject').toDate().toISOString();
 	}
 
+	// Only what the manager actually changed gets sent and validated, so fixing a
+	// note on an appointment whose time is no longer 'available' still saves.
+	const timeDirty = $derived.by(() => {
+		if (!(kind === 'details' && appointment)) return false;
+		try {
+			return Date.parse(startAt()) !== Date.parse(appointment.start_at) || Date.parse(endAt()) !== Date.parse(appointment.end_at);
+		} catch {
+			return true;
+		}
+	});
+	const notesDirty = $derived(kind === 'details' && !!appointment && notes.trim() !== (appointment.notes ?? '').trim());
+	const timeBlocked = $derived(kind === 'details' ? timeDirty && (!endValid || !timeAvailable) : needsAvailability && !timeAvailable);
+
 	function endAt() {
 		return toZoned(parseDateTime(date + 'T' + end), timezone, 'reject').toDate().toISOString();
 	}
@@ -179,11 +194,11 @@
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
 		if (saving) return;
-		if (!endValid) {
+		if (timeDirty && !endValid) {
 			error = $t('schedule.endBeforeStart');
 			return;
 		}
-		if (needsAvailability && !timeAvailable) {
+		if (timeBlocked) {
 			error = $t('schedule.timeUnavailable');
 			return;
 		}
@@ -202,7 +217,9 @@
 			} else if (kind === 'removeBreak' && breakItem) {
 				await api.del('/v1/doctor-breaks/' + encodeURIComponent(breakItem.id));
 			} else if (kind === 'details' && appointment && editing) {
-				await api.patch('/v1/bookings/' + encodeURIComponent(appointment.id) + '/reschedule', { start_at: startAt(), end_at: endAt() });
+				const id = encodeURIComponent(appointment.id);
+				if (notesDirty) await api.patch('/v1/bookings/' + id, { notes: notes.trim() });
+				if (timeDirty) await api.patch('/v1/bookings/' + id + '/reschedule', { start_at: startAt(), end_at: endAt() });
 			} else if (kind === 'booking') {
 				const payload = {
 					staff_id: staffID, start_at: startAt(), duration_minutes: duration,
@@ -360,7 +377,7 @@
 			{/if}
 		{/if}
 		{#if confirmingCancel}<p class="rounded-lg bg-destructive/5 p-3 text-sm text-destructive">{$t('schedule.cancelHelp')}</p>{/if}
-		{#if kind === 'booking' || kind === 'dayOff'}
+		{#if kind === 'booking' || kind === 'dayOff' || editing}
 			<div class="space-y-2">
 				<Label for="schedule-notes">{$t(kind === 'dayOff' ? 'schedule.dayOffReason' : 'schedule.notes')} <span class="font-normal text-muted-foreground">{$t('common.optional')}</span></Label>
 				<Textarea id="schedule-notes" bind:value={notes} rows={3} maxlength={5000} class="resize-y bg-muted/15 shadow-xs" />
@@ -371,21 +388,16 @@
 
 	<div class="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/10 px-6 py-4">
 		{#if kind === 'details' && !editing}
-			{#if appointment?.status !== 'cancelled'}
-				{#if confirmingCancel}
-					<Button variant="outline" type="button" disabled={saving} onclick={() => confirmingCancel = false}>{$t('common.back')}</Button>
-					<Button variant="destructive" type="button" disabled={saving} onclick={cancelAppointment}>{$t(saving ? 'common.saving' : 'schedule.cancelBooking')}</Button>
-				{:else}
-					<Button variant="ghost" type="button" class="mr-auto text-destructive hover:bg-destructive/5 hover:text-destructive" disabled={saving} onclick={() => confirmingCancel = true}>{$t('schedule.cancelBooking')}</Button>
-					<Button variant="outline" type="button" onclick={onDismiss}>{$t('common.close')}</Button>
-					<Button type="button" onclick={() => { editing = true; error = ''; }}>{$t('bookings.reschedule.action')}</Button>
-				{/if}
-			{:else}
-				<Button variant="outline" type="button" onclick={onDismiss}>{$t('common.close')}</Button>
-			{/if}
+			<Button variant="outline" type="button" onclick={onDismiss}>{$t('common.close')}</Button>
+		{:else if kind === 'details' && confirmingCancel}
+			<Button variant="outline" type="button" disabled={saving} onclick={() => confirmingCancel = false}>{$t('common.back')}</Button>
+			<Button variant="destructive" type="button" disabled={saving} onclick={cancelAppointment}>{$t(saving ? 'common.saving' : 'schedule.cancelBooking')}</Button>
 		{:else}
-			<Button variant="outline" type="button" disabled={saving} onclick={() => { if (editing) { editing = false; error = ''; } else onDismiss(); }}>{$t('common.cancel')}</Button>
-			<Button type="submit" variant={kind === 'removeBreak' || kind === 'removeDayOff' ? 'destructive' : 'default'} disabled={saving || !endValid || (needsAvailability && !timeAvailable)}>
+			{#if kind === 'details'}
+				<Button variant="ghost" type="button" class="mr-auto text-destructive hover:bg-destructive/5 hover:text-destructive" disabled={saving} onclick={() => confirmingCancel = true}>{$t('schedule.cancelBooking')}</Button>
+			{/if}
+			<Button variant="outline" type="button" disabled={saving} onclick={onDismiss}>{$t(kind === 'details' ? 'common.close' : 'common.cancel')}</Button>
+			<Button type="submit" variant={kind === 'removeBreak' || kind === 'removeDayOff' ? 'destructive' : 'default'} disabled={saving || (kind === 'details' ? (!timeDirty && !notesDirty) || timeBlocked : needsAvailability && !timeAvailable)}>
 				{$t(saving ? 'common.saving' : kind === 'removeBreak' || kind === 'removeDayOff' ? 'common.delete' : kind === 'booking' ? 'schedule.newBooking' : 'common.save')}
 			</Button>
 		{/if}

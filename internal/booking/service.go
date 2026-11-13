@@ -438,6 +438,31 @@ func hostOnBreak(ctx context.Context, tx *sql.Tx, hostID, start, end string) (bo
 }
 
 // Get returns a single booking by ID.
+// UpdateNotes replaces a booking's notes (empty clears them) and returns the
+// updated booking. Cancelled bookings are read-only.
+func (s *Service) UpdateNotes(ctx context.Context, id, notes string) (*Booking, error) {
+	if utf8.RuneCountInString(notes) > 5000 {
+		return nil, ErrNotesTooLong
+	}
+	notes = strings.TrimSpace(notes)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE bookings SET notes = ?, updated_at = ? WHERE id = ? AND status != 'cancelled'`,
+		notes, time.Now().UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return nil, fmt.Errorf("booking: update notes: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		b, err := s.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if b.Status == "cancelled" {
+			return nil, ErrAlreadyCancelled
+		}
+	}
+	return s.Get(ctx, id)
+}
+
 func (s *Service) Get(ctx context.Context, id string) (*Booking, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT `+bookingColumns+` FROM bookings WHERE id = ?`, id)
 	return scanBooking(row)
