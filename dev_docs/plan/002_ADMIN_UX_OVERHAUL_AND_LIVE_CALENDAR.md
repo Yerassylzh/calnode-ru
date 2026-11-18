@@ -1,6 +1,6 @@
 # 002 — Admin UX overhaul: leaner navigation, enterprise-grade calendar interactions, live bookings
 
-Status: Phase 0 and Phase 1 implemented (2026-11-18, see section 10); Phases 2-7 not started.
+Status: Phases 0-2 implemented (2026-11-18, see sections 10-11); Phases 3-7 not started.
 Prepared: 2026-11-18.
 
 ## 1. Objective and ground rules
@@ -287,3 +287,29 @@ Consequences the team should know about: (a) with the Integrations page gone the
 ### 10.4 Verification
 
 `pnpm check` 0 errors; `pnpm test:visual` 17/17 passing; `pnpm build` succeeds. Go is not installed on this machine, so the binary was **not** rebuilt and the real app was not run. The built frontend was exercised in the in-app browser against a mock API: sidebar items, `/calendar?connected=true` and `/schedule` redirects, `/teams` now 404s inside the app, Settings nav, Russian labels, and the day-off option rendering as "Выходной".
+
+## 11. Phase 2 implementation record (2026-11-18) - live bookings
+
+### 11.1 What shipped (frontend only, no backend change)
+
+- `lib/live/poller.ts`: visibility-aware polling. Runs every 15 s while the tab is visible and online; pauses when hidden; refetches immediately on `visibilitychange`, `focus` and `online`; never overlaps runs; exponential backoff (cap 2 min) after failures.
+- `lib/live/diff.ts`: pure snapshot diff (added / time-changed / details-changed / cancelled / removed). Diffs on the fields the API already returns, so no `updated_at` is needed.
+- **Calendar** (`routes/+page.svelte`): `load()` now has a `silent` mode that never shows the loading state, keeps the old data on failure, and skips state writes when nothing changed (no re-render). Each tick fetches bookings + availability; breaks every fourth tick.
+- **Arrivals are visible**: changed or new blocks flash (`.live-flash`, reduced-motion safe) and a toast names the booking ("Новая запись: … · ср, 18, 12:00"); more than three changes collapse to one toast.
+- **Own edits are not echoed back**: `saved()` refreshes silently with `notify: false`.
+- **Open booking form is protected**: if the booking being edited is changed elsewhere, an amber banner appears with "Загрузить актуальное"; if it is cancelled elsewhere the form flips to read-only with a banner.
+- **Header indicator**: "Обновлено 21:41" plus a manual refresh button; "Нет связи - повторяем" while polls fail, clearing on recovery.
+- **URL state**: `?week=YYYY-MM-DD` and `?staff=<id>` (admins only) are written with `replaceState` and read on load; defaults (current week, yourself) stay out of the URL. Deep links to any day normalise to that week.
+- **Bookings page**: quiet background refresh with the same poller, skipped while reloading or while an inline reschedule is open; a transient failure never shows the error banner; toast when the upcoming count grows.
+- Fixed a latent bug while here: a superseded load could leave the calendar stuck in "loading".
+
+### 11.2 Deliberately not done
+
+- **BroadcastChannel multi-tab sharing** (section 5.1): each tab polls on its own. At 15 s and two small requests this is cheap; revisit with section 5.3 if many admin tabs are open.
+- **"N new" chip for changes outside the visible week**: only the visible week is fetched, so off-screen arrivals are not detected. Needs the backend `updated_since`/SSE option in section 5.3.
+- **Request abort**: `api.get` has no `AbortSignal`; superseded responses are discarded by a version counter instead.
+- Time-of-day correctness of toasts uses the staff member's timezone, matching the grid.
+
+### 11.3 Verification
+
+`pnpm check` 0 errors; `pnpm test:visual` 25/25 (8 new tests for the diff, backoff and poller); build succeeds. Against a mock API in the in-app browser: a booking added remotely appeared on an open calendar with a flash and toast without a reload; moving it while its form was open showed the banner and "Load latest" applied the new time; cancelling it flipped the form to read-only; simulated 500s showed the offline chip, kept the grid, and cleared on recovery; `?week=` survived a reload; the bookings page picked up a new booking and toasted. As before, the real Go binary was not run (Go is not installed here), and the 15 s timer itself was exercised through `focus` events and unit tests rather than a real 15 s wait.

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { toast } from 'svelte-sonner';
+	import { createPoller } from '$lib/live/poller';
 	import { api, type Booking } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { prefs, fmtDateTime } from '$lib/prefs';
@@ -88,7 +90,9 @@
 	// the newer one. Only the most recent request is allowed to apply.
 	let loadSeq = 0;
 
-	async function load() {
+	// `background` loads (the poller) must not surface a transient failure as an error banner:
+	// they rethrow so the poller backs off, and the page keeps showing what it had.
+	async function load(background = false) {
 		const seq = ++loadSeq;
 		try {
 			const res = await api.get<{
@@ -113,6 +117,7 @@
 			}
 		} catch (e: any) {
 			if (seq !== loadSeq) return;
+			if (background) throw e;
 			error = e.message;
 		} finally {
 			if (seq === loadSeq) loading = false;
@@ -173,10 +178,22 @@
 		refreshing = false;
 	}
 
+	// Live updates: quiet background refresh while the tab is visible. Skipped while a reload,
+	// manual refresh or an inline reschedule is in progress so rows never shift under the user.
+	async function poll() {
+		if (loading || refreshing || reschedulingId) return;
+		const before = counts.upcoming;
+		await load(true);
+		if (counts.upcoming > before) toast.info($t('bookings.live.newArrived'));
+	}
+	const poller = createPoller({ run: poll });
+
 	onMount(() => {
 		scope = isAdmin ? 'all' : 'mine';
 		load();
 		loadFilterOptions();
+		poller.start();
+		return () => poller.stop();
 	});
 
 	let confirmOpen = $state(false);

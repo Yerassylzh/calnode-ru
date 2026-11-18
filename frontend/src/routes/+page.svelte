@@ -1,13 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
-	import { today, type CalendarDate } from '@internationalized/date';
-	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Plus, Settings2, UserRound } from '@lucide/svelte';
+	import { page } from '$app/stores';
+	import { replaceState } from '$app/navigation';
+	import { parseDate, today, type CalendarDate } from '@internationalized/date';
+	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Plus, RefreshCw, Settings2, UserRound, WifiOff } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { api, type Booking, type DoctorBreak, type ScheduleDay, type TeamMember } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { prefs } from '$lib/prefs';
 	import { startOfWeek, clockLabel, hourLabel } from '$lib/datetime';
+	import { createPoller } from '$lib/live/poller';
+	import { diffBookings, isEmptyDiff } from '$lib/live/diff';
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -38,6 +42,16 @@
 	let initialDate = $state('');
 	let initialTime = $state('');
 	let target = $state<Booking | DoctorBreak | ScheduleDay>();
+
+	// Live-update state. `lastUpdated`/`liveFailed` drive the header indicator; `pulse` marks
+	// blocks that just arrived or changed remotely; `remoteNotice` warns an open booking form.
+	let lastUpdated = $state<Date | null>(null);
+	let liveFailed = $state(false);
+	let refreshing = $state(false);
+	let pulse = $state<Set<string>>(new Set());
+	let remoteNotice = $state<'' | 'changed' | 'cancelled' | 'removed'>('');
+	let remoteFresh = $state<Booking | undefined>();
+	let pollTick = 0;
 
 	const blocks = $derived(days.map((day) => {
 		const items: Block[] = [];
@@ -104,8 +118,12 @@
 			staff = user.is_admin
 				? (await api.get<TeamMember[]>('/v1/users')).filter((member) => !member.archived)
 				: [user];
-			staffID = staff.find((member) => member.id === user.id)?.id ?? staff[0]?.id ?? '';
-			week = weekOf(today(timezone));
+			// ?staff= and ?week= make a refresh, a back-navigation or a shared link land where you were.
+			const params = $page.url.searchParams;
+			const wanted = user.is_admin ? params.get('staff') : null;
+			staffID = staff.find((member) => member.id === wanted)?.id
+				?? staff.find((member) => member.id === user.id)?.id ?? staff[0]?.id ?? '';
+			week = weekFromParam(params.get('week')) ?? weekOf(today(timezone));
 			await load();
 		} catch (error) {
 			loadError = message(error);
@@ -114,13 +132,63 @@
 		}
 	}
 
-	onMount(() => { void initialize(); });
+	function weekFromParam(value: string | null) {
+		if (!value) return undefined;
+		try {
+			return weekOf(parseDate(value));
+		} catch {
+			return undefined;
+		}
+	}
+
+	// Mirror week/staff into the URL without adding history entries; defaults stay out of it.
+	function syncUrl() {
+		const url = new URL(location.href);
+		if (weekOf(today(timezone)).compare(week) === 0) url.searchParams.delete('week');
+		else url.searchParams.set('week', week.toString());
+		if (staffID && staffID !== $currentUser?.id) url.searchParams.set('staff', staffID);
+		else url.searchParams.delete('staff');
+		replaceState(url.pathname + url.search, {});
+	}
+
+	const poller = createPoller({ run: poll });
+
+	onMount(() => {
+		void initialize().then(() => poller.start());
+		return () => poller.stop();
+	});
+
+	// Background refresh: bookings + availability every tick (free time depends on bookings);
+	// breaks only change through this UI, so they ride along every fourth tick.
+	async function poll() {
+		if (!staffID || loading) return;
+		await load({ silent: true, notify: true, breaks: ++pollTick % 4 === 0 });
+	}
+
+	async function refreshNow() {
+		if (refreshing || !staffID) return;
+		refreshing = true;
+		try {
+			await load({ silent: true, notify: true, breaks: true });
+		} catch {
+			// liveFailed already reflects it
+		} finally {
+			refreshing = false;
+		}
+	}
 
 	function message(error: unknown) {
 		return error instanceof Error ? error.message : $t('schedule.loadFailed');
 	}
 
-	async function load() {
+	type LoadOptions = { silent?: boolean; notify?: boolean; breaks?: boolean };
+
+	const sameJSON = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+	// `silent` keeps the grid on screen (no loading state, previous data survives a failure) and
+	// throws on failure so the poller can back off. `notify` announces what changed since the
+	// last snapshot - never set it for loads that follow this tab's own edits.
+	async function load({ silent = false, notify = false, breaks: withBreaks = !silent }: LoadOptions = {}) {
 		if (!staffID) return;
 		const request = ++version;
 		const id = staffID;
@@ -128,26 +196,101 @@
 		const to = midnight(week.add({ days: 7 }), timezone).toISOString();
 		const bookingParams = new URLSearchParams({ host: id, scope: 'all', from: from.slice(0, 10), to: to.slice(0, 10), limit: '100' });
 		const scheduleParams = new URLSearchParams({ staff_id: id, from, to });
-		loading = true;
-		loadError = '';
-		availabilityError = '';
+		if (!silent) {
+			loading = true;
+			loadError = '';
+			availabilityError = '';
+		}
 		try {
 			const [bookingItems, breakItems, free] = await Promise.allSettled([
 				loadBookings(bookingParams),
-				api.get<{ items: DoctorBreak[] }>('/v1/doctor-breaks?' + new URLSearchParams({ user_id: id })),
+				withBreaks ? api.get<{ items: DoctorBreak[] }>('/v1/doctor-breaks?' + new URLSearchParams({ user_id: id })) : Promise.resolve(undefined),
 				api.get<{ windows: Window[]; days: ScheduleDay[] }>('/v1/schedule/availability?' + scheduleParams)
 			]);
 			if (request !== version) return;
+			if (silent) {
+				if (bookingItems.status === 'rejected' || free.status === 'rejected') {
+					liveFailed = true;
+					throw new Error('live refresh failed');
+				}
+				liveFailed = false;
+				lastUpdated = new Date();
+				const nextWindows = free.value.windows;
+				const nextDays = free.value.days ?? [];
+				if (notify) announce(bookings, bookingItems.value);
+				if (!sameJSON(bookings, bookingItems.value)) bookings = bookingItems.value;
+				if (!sameJSON(windows, nextWindows)) windows = nextWindows;
+				if (!sameJSON(scheduleDays, nextDays)) scheduleDays = nextDays;
+				if (breakItems.status === 'fulfilled' && breakItems.value && !sameJSON(breaks, breakItems.value.items)) breaks = breakItems.value.items;
+				return;
+			}
 			bookings = bookingItems.status === 'fulfilled' ? bookingItems.value : [];
-			breaks = breakItems.status === 'fulfilled' ? breakItems.value.items : [];
+			breaks = breakItems.status === 'fulfilled' && breakItems.value ? breakItems.value.items : [];
 			windows = free.status === 'fulfilled' ? free.value.windows : [];
 			scheduleDays = free.status === 'fulfilled' ? free.value.days ?? [] : [];
 			const failed = [bookingItems, breakItems].find((result) => result.status === 'rejected');
 			if (failed?.status === 'rejected') loadError = message(failed.reason);
 			if (free.status === 'rejected') availabilityError = message(free.reason);
+			if (bookingItems.status === 'fulfilled' && free.status === 'fulfilled') {
+				liveFailed = false;
+				lastUpdated = new Date();
+			}
 		} finally {
 			if (request === version) loading = false;
 		}
+	}
+
+	function whenLabel(iso: string) {
+		return new Date(iso).toLocaleString($localeTag, {
+			timeZone: timezone, weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+			hour12: $prefs.time_format === '12h'
+		});
+	}
+
+	// Turns a snapshot diff into highlights, toasts and - if the booking open in the dialog was
+	// touched - a banner, instead of silently editing stale data.
+	function announce(prev: Booking[], next: Booking[]) {
+		const diff = diffBookings(prev, next);
+		if (isEmptyDiff(diff)) return;
+		const nameOf = (item: Booking) => item.attendees[0]?.name || $t('schedule.appointment');
+		const events: string[] = [
+			...diff.added.map((item) => $t('schedule.live.added', { name: nameOf(item), when: whenLabel(item.start_at) })),
+			...diff.changed.map(({ booking, kind }) => kind === 'time'
+				? $t('schedule.live.rescheduled', { name: nameOf(booking), when: whenLabel(booking.start_at) })
+				: $t('schedule.live.edited', { name: nameOf(booking) })),
+			...diff.cancelled.map((item) => $t('schedule.live.cancelled', { name: nameOf(item), when: whenLabel(item.start_at) })),
+			...diff.removed.map((item) => $t('schedule.live.removed', { name: nameOf(item), when: whenLabel(item.start_at) }))
+		];
+		if (events.length > 3) toast.info($t('schedule.live.many', { count: events.length }));
+		else for (const text of events) toast.info(text);
+
+		const ids = [...diff.added.map((item) => item.id), ...diff.changed.map((item) => item.booking.id)];
+		if (ids.length) {
+			pulse = new Set(ids);
+			setTimeout(() => (pulse = new Set()), 4000);
+		}
+
+		if (dialogOpen && editor === 'details' && target && 'start_at' in target) {
+			const openId = target.id;
+			const cancelled = diff.cancelled.find((item) => item.id === openId);
+			const removed = diff.removed.find((item) => item.id === openId);
+			const changed = diff.changed.find((item) => item.booking.id === openId);
+			if (cancelled) {
+				target = cancelled; // cancelled bookings render read-only
+				remoteNotice = 'cancelled';
+			} else if (removed) {
+				remoteNotice = 'removed';
+			} else if (changed) {
+				remoteFresh = changed.booking;
+				remoteNotice = 'changed';
+			}
+		}
+	}
+
+	function loadLatest() {
+		if (remoteFresh) target = remoteFresh;
+		remoteFresh = undefined;
+		remoteNotice = '';
 	}
 
 	async function loadBookings(params: URLSearchParams) {
@@ -162,6 +305,7 @@
 
 	function goToWeek(day: CalendarDate) {
 		week = day;
+		syncUrl();
 		void load();
 	}
 
@@ -170,6 +314,8 @@
 		initialDate = date;
 		initialTime = time;
 		target = item;
+		remoteNotice = '';
+		remoteFresh = undefined;
 		dialogOpen = true;
 	}
 
@@ -192,7 +338,8 @@
 	function saved() {
 		dialogOpen = false;
 		toast.success($t('schedule.saved'));
-		void load();
+		// Own edit: refresh quietly and do not announce it back as a remote change.
+		void load({ silent: true, notify: false, breaks: true }).catch(() => {});
 	}
 </script>
 
@@ -209,7 +356,18 @@
 			</h2>
 		</div>
 		<div class="ml-auto flex flex-wrap items-center gap-2">
-			<Select.Root type="single" value={staffID} onValueChange={(value) => { staffID = value; void load(); }}>
+			<div class="flex items-center gap-1 text-xs text-muted-foreground">
+				{#if liveFailed}
+					<span role="status" class="flex items-center gap-1 text-amber-700 dark:text-amber-400"><WifiOff class="size-3.5" />{$t('schedule.live.offline')}</span>
+				{:else if lastUpdated}
+					<span class="hidden tabular-nums lg:inline">{$t('schedule.live.updatedAt', { time: lastUpdated.toLocaleTimeString($localeTag, { hour: '2-digit', minute: '2-digit', hour12: $prefs.time_format === '12h' }) })}</span>
+				{/if}
+				<Button variant="ghost" size="icon" class="size-8" onclick={refreshNow} disabled={!staffID || refreshing}
+					aria-label={$t('schedule.live.refresh')} title={$t('schedule.live.refresh')}>
+					<RefreshCw class="size-3.5 {refreshing ? 'animate-spin' : ''}" />
+				</Button>
+			</div>
+			<Select.Root type="single" value={staffID} onValueChange={(value) => { staffID = value; syncUrl(); void load(); }}>
 				<Select.Trigger class="data-[size=default]:h-9 w-[180px] bg-background shadow-xs" aria-label={$t('schedule.staff')} disabled={!staff.length}>
 					<span class="flex min-w-0 items-center gap-2"><UserRound class="size-4 text-muted-foreground" /><span class="truncate">{staff.find((member) => member.id === staffID)?.name || staff.find((member) => member.id === staffID)?.email || $t('common.select')}</span></span>
 				</Select.Trigger>
@@ -235,7 +393,7 @@
 		{#if loadError || availabilityError}
 			<div class="flex flex-wrap items-center gap-3 border-b bg-muted/50 px-4 py-2 text-sm" role="alert">
 				<span>{loadError || availabilityError}</span>
-				<Button variant="outline" size="sm" onclick={staffID ? load : initialize}>{$t('doctorBreaks.retry')}</Button>
+				<Button variant="outline" size="sm" onclick={() => (staffID ? load() : initialize())}>{$t('doctorBreaks.retry')}</Button>
 			</div>
 		{/if}
 		{#if loading}
@@ -279,7 +437,7 @@
 							{#each blocks[i] as block (block.kind + block.id)}
 								<button type="button" onclick={(event) => onBlock(day, block, event)}
 									class="absolute inset-x-1 flex flex-col items-start justify-start overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-left text-xs leading-tight transition hover:brightness-95 focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-primary
-										{block.kind === 'free' ? 'border-emerald-500 bg-emerald-100 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-100' : block.kind === 'booking' ? 'z-10 border-blue-500 bg-blue-100 text-blue-950 dark:bg-blue-950 dark:text-blue-100' : 'z-10 border-amber-500 bg-amber-100 text-amber-950 dark:bg-amber-950 dark:text-amber-100'}"
+										{block.kind === 'booking' && pulse.has(block.id) ? 'live-flash' : ''} {block.kind === 'free' ? 'border-emerald-500 bg-emerald-100 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-100' : block.kind === 'booking' ? 'z-10 border-blue-500 bg-blue-100 text-blue-950 dark:bg-blue-950 dark:text-blue-100' : 'z-10 border-amber-500 bg-amber-100 text-amber-950 dark:bg-amber-950 dark:text-amber-100'}"
 									style:top={(block.start / 60 - firstHour) / hours.length * 100 + '%'}
 									style:height={'calc(' + (block.end - block.start) / 60 / hours.length * 100 + '% - 1px)'}
 									title={block.label + ' · ' + label12(block.start) + '–' + label12(block.end)}
@@ -305,7 +463,7 @@
 			<Dialog.Description class={editor === 'details' ? 'sr-only' : ''}>{staff.find((member) => member.id === staffID)?.name || timezone}</Dialog.Description>
 		</Dialog.Header>
 		{#if dialogOpen}
-			<ScheduleForm kind={editor} {staffID} {timezone} {initialDate} {initialTime} {target} staffName={staff.find((member) => member.id === staffID)?.name || ''} onSaved={saved} onDismiss={() => dialogOpen = false} />
+			<ScheduleForm kind={editor} {staffID} {timezone} {initialDate} {initialTime} {target} staffName={staff.find((member) => member.id === staffID)?.name || ''} remoteNotice={remoteNotice} onLoadLatest={loadLatest} onSaved={saved} onDismiss={() => dialogOpen = false} />
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

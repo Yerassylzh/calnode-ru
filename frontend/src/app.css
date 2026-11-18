@@ -140,3 +140,14 @@ body {
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
+
+
+/* One-shot highlight for a calendar block that just arrived or changed remotely. */
+@keyframes live-flash {
+	0%, 100% { box-shadow: 0 0 0 0 transparent; }
+	25% { box-shadow: 0 0 0 3px var(--ring); }
+}
+.live-flash { animation: live-flash 1.4s ease-out 2; }
+@media (prefers-reduced-motion: reduce) {
+	.live-flash { animation: none; outline: 2px solid var(--ring); }
+}

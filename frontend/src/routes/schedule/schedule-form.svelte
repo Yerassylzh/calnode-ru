@@ -12,7 +12,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import TimePicker from './time-picker.svelte';
 
-	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, onSaved, onDismiss }: {
+	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, remoteNotice = '', onLoadLatest, onSaved, onDismiss }: {
 		kind: 'booking' | 'break' | 'details' | 'removeBreak' | 'dayOff' | 'removeDayOff';
 		staffID: string;
 		staffName: string;
@@ -20,6 +20,9 @@
 		initialDate: string;
 		initialTime: string;
 		target?: Booking | DoctorBreak | ScheduleDay;
+		/** Set by the calendar when the open booking changed elsewhere while this form was open. */
+		remoteNotice?: '' | 'changed' | 'cancelled' | 'removed';
+		onLoadLatest?: () => void;
 		onSaved: () => void;
 		onDismiss: () => void;
 	} = $props();
@@ -250,6 +253,14 @@
 
 <form onsubmit={save}>
 	<div class="space-y-6 px-6 py-6">
+		{#if remoteNotice}
+			<div role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+				<span>{$t(remoteNotice === 'changed' ? 'schedule.live.changedBanner' : remoteNotice === 'cancelled' ? 'schedule.live.cancelledBanner' : 'schedule.live.removedBanner')}</span>
+				{#if remoteNotice === 'changed' && onLoadLatest}
+					<Button type="button" variant="outline" size="sm" onclick={onLoadLatest}>{$t('schedule.live.loadLatest')}</Button>
+				{/if}
+			</div>
+		{/if}
 		{#if kind === 'details' && appointment}
 			<div class="flex items-start gap-3">
 				<div class="grid size-11 shrink-0 place-items-center rounded-full bg-primary/5 text-primary"><UserRound class="size-5" /></div>
