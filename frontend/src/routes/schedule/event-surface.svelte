@@ -66,7 +66,7 @@
 			sideOffset={8}
 			collisionPadding={12}
 			aria-label={title}
-			class="max-h-[min(85dvh,720px)] w-[420px] max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-xl p-0 shadow-xl"
+			class="max-h-[min(85dvh,720px)] w-[560px] max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-xl p-0 shadow-xl"
 		>
 			<div class="flex items-start justify-between gap-3 border-b px-5 py-3.5">
 				<div class="min-w-0">
@@ -80,7 +80,7 @@
 	</Popover.Root>
 {:else}
 	<Dialog.Root {open} onOpenChange={dismiss}>
-		<Dialog.Content class="max-h-[90dvh] gap-0 overflow-y-auto rounded-2xl p-0 max-sm:bottom-0 max-sm:left-0 max-sm:top-auto max-sm:max-w-full max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none sm:max-w-[480px]">
+		<Dialog.Content class="max-h-[90dvh] gap-0 overflow-y-auto rounded-2xl p-0 max-sm:bottom-0 max-sm:left-0 max-sm:top-auto max-sm:max-w-full max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none sm:max-w-[560px]">
 			<Dialog.Header class="border-b px-5 py-4 pr-12">
 				<Dialog.Title>{title}</Dialog.Title>
 				<Dialog.Description class={description ? '' : 'sr-only'}>{description || title}</Dialog.Description>

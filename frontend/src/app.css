@@ -157,3 +157,12 @@ body {
 	background-color: color-mix(in oklab, var(--muted) 55%, transparent);
 	background-image: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in oklab, var(--border) 70%, transparent) 7px 8px);
 }
+
+/* Slim scrollbars that stay out of sight until the area is hovered or scrolled. */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: transparent transparent;
+}
+*:hover {
+	scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent) transparent;
+}

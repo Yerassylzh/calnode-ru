@@ -26,7 +26,7 @@
 	let name = $state('');
 	let booking_accent = $state('#111827');
 	let timezone = $state('UTC');
-	let time_format = $state<'12h' | '24h'>('12h');
+	let time_format = $state<'12h' | '24h'>('24h');
 	let week_start = $state(1);
 	let date_format = $state<'dmy' | 'mdy' | 'ymd'>('dmy');
 
@@ -78,7 +78,7 @@
 		name = user.name ?? '';
 		booking_accent = user.booking_accent;
 		timezone = user.timezone;
-		time_format = user.time_format ?? '12h';
+		time_format = user.time_format ?? '24h';
 		week_start = user.week_start ?? 1;
 		date_format = user.date_format ?? 'dmy';
 		avatarUrl = user.avatar_url ?? '';

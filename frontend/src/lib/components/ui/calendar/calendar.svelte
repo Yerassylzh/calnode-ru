@@ -18,7 +18,7 @@
 	bind:value
 	{onValueChange}
 	{weekStartsOn}
-	class={cn('p-3', className)}
+	class={cn('p-4', className)}
 	{...restProps}
 >
 	{#snippet children({ months, weekdays })}
@@ -42,7 +42,7 @@
 					<CalendarPrimitive.GridRow class="flex">
 						{#each weekdays as weekday}
 							<CalendarPrimitive.HeadCell
-								class="w-8 rounded-md pb-2 text-center text-[0.75rem] font-medium text-muted-foreground"
+								class="w-9 pb-2 text-center text-[0.7rem] font-medium uppercase tracking-wide text-muted-foreground"
 							>
 								{weekday.slice(0, 2)}
 							</CalendarPrimitive.HeadCell>
@@ -56,15 +56,15 @@
 								<CalendarPrimitive.Cell
 									{date}
 									month={month.value}
-									class="relative size-8 p-0 text-center text-sm focus-within:relative focus-within:z-20"
+									class="relative size-9 p-0 text-center text-sm focus-within:relative focus-within:z-20"
 								>
 									<CalendarPrimitive.Day
 										class={cn(
-											'inline-flex size-8 items-center justify-center rounded-md text-sm transition-colors',
+											'inline-flex size-9 items-center justify-center rounded-lg text-sm transition-colors',
 											'hover:bg-accent hover:text-accent-foreground',
 											'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
 											'data-selected:bg-primary data-selected:text-primary-foreground data-selected:hover:bg-primary data-selected:hover:text-primary-foreground',
-											'data-today:font-semibold data-today:underline data-today:underline-offset-2',
+											'data-today:font-semibold data-today:ring-1 data-today:ring-primary/50',
 											'data-outside-month:text-muted-foreground data-outside-month:opacity-40',
 											'data-disabled:text-muted-foreground data-disabled:opacity-40 data-disabled:pointer-events-none',
 										)}

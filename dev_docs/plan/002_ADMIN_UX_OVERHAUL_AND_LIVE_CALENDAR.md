@@ -380,3 +380,12 @@ Pre-existing, unrelated, left alone: `internal/server` `TestRateLimit_returns429
 **Decided not to build** (the existing UI covers them): a user dropdown menu and a mobile slide-over sheet (the sidebar already has the same actions as a collapsible rail and a phone overlay), and merging Settings into one page (Profile and Notifications each own a form with its own `Ctrl+S`).
 
 **Still open:** an automated accessibility audit. Adding `axe-core` (a dev dependency) to run it inside the existing Vitest browser setup was not done because it means installing a new package; run axe or Lighthouse before release. Also drag-to-resize (changing duration by dragging a block's bottom edge) and a full Russian copy review of the older catalogs.
+
+## 18. Simplification pass (2026-11-18, after review of the shipped UI)
+
+Feedback on the shipped UI: too many buttons, long modals, no plain typed date/time, ugly scrollbars. Changes (frontend, plus one data migration):
+- **Top bar** is now arrows, the date label (opens the date jump), Week/Day, staff picker and a single **+** menu (New booking / Add break / Add day off). Removed Today, refresh, the shortcuts button, the hours-settings icon, the separate break/day-off buttons, the "Updated" text and **all keyboard shortcuts** (and the shortcuts dialog). An offline notice still appears if the server cannot be reached.
+- **Booking form** is shorter and wider (560 px, no scrolling): name, one contact field with a Phone/Email switch, date (with arrows and a nicer calendar), a typed time field (digits auto-format to HH:MM) plus up to eight nearby free times, duration chips with the end time, and a two-line note. Breaks use the same typed time fields. The old hour/minute popover and grouped chip list were deleted.
+- **Scrollbars** are slim and invisible until hover, app-wide.
+- **24-hour time is the default** everywhere: frontend defaults, and migration `00076_default_24h_time.sql` which moves existing users to 24 h once (they can switch back in their profile) and makes new users start on 24 h through a trigger. One handler test and one visual test were updated to the new defaults.
+- Verified in the in-app browser against the mock API (header is one 36 px row with exactly those controls; the + menu lists the three actions; the form is 532 x 571 px with no scrolling; typing `1430` gives 14:30 and shows the nearby free times; `2330` is flagged as not fitting) and with Go tests in the container (`internal/db`, `internal/booking`, `internal/handler` pass). `pnpm check` 0 errors, `pnpm test:visual` 51/51.

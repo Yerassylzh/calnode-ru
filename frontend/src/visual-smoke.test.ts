@@ -55,11 +55,11 @@ describe('shadcn component state styling', () => {
 
 	// NB: query the Day element ([data-bits-day]) — the styling classes live there,
 	// while the parent Cell (<td>) also carries data-selected/data-today.
-	test('Calendar: today cell is underlined (data-today)', async () => {
+	test('Calendar: today cell is ringed (data-today)', async () => {
 		const { container } = await render(Calendar, {});
 		const todayCell = container.querySelector('[data-bits-day][data-today]')!;
 		expect(todayCell).toBeTruthy();
-		expect(getComputedStyle(todayCell).textDecorationLine).toContain('underline');
+		expect(getComputedStyle(todayCell).boxShadow).not.toBe('none');
 	});
 
 	test('Calendar: selected day = --primary fill (data-selected)', async () => {

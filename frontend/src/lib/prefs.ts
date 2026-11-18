@@ -11,7 +11,7 @@ export interface UserPrefs {
 
 const defaults: UserPrefs = {
 	timezone: 'UTC',
-	time_format: '12h',
+	time_format: '24h',
 	week_start: 1,
 	date_format: 'dmy'
 };
@@ -21,7 +21,7 @@ export const prefs = writable<UserPrefs>(defaults);
 export function prefsFromUser(u: User): UserPrefs {
 	return {
 		timezone: u.timezone,
-		time_format: u.time_format ?? '12h',
+		time_format: u.time_format ?? '24h',
 		week_start: u.week_start ?? 1,
 		date_format: u.date_format ?? 'dmy'
 	};

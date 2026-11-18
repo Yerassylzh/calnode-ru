@@ -12,11 +12,10 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Label } from '$lib/components/ui/label';
 	import { DatePicker } from '$lib/components/ui/date-picker';
-	import * as Select from '$lib/components/ui/select';
 	import { createStartChecker } from '$lib/schedule/slots';
 	import { isValidPhone, normalizePhone } from '$lib/phone';
-	import TimePicker from './time-picker.svelte';
-	import SlotPicker from './slot-picker.svelte';
+	import TimeInput from './time-input.svelte';
+	import SlotSuggestions from './slot-suggestions.svelte';
 	import DurationChips from './duration-chips.svelte';
 	import PhoneField from './phone-field.svelte';
 
@@ -253,7 +252,7 @@
 </script>
 
 <form onsubmit={save}>
-	<div class="space-y-5 px-5 py-5">
+	<div class="space-y-4 px-5 py-4">
 		{#if remoteNotice}
 			<div role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
 				<span>{$t(remoteNotice === 'changed' ? 'schedule.live.changedBanner' : remoteNotice === 'cancelled' ? 'schedule.live.cancelledBanner' : 'schedule.live.removedBanner')}</span>
@@ -293,89 +292,77 @@
 		{/if}
 
 		{#if kind === 'booking'}
-			<div class="space-y-2">
+			<div class="space-y-1.5">
 				<Label for="schedule-attendee">{$t('schedule.attendee')}</Label>
-				<Input id="schedule-attendee" class="h-11 bg-muted/15 shadow-xs" bind:value={name} autocomplete="name" required />
+				<Input id="schedule-attendee" class="h-10" bind:value={name} autocomplete="name" required />
 			</div>
-			<div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
-				<div class="space-y-2">
-					<Label for="schedule-contact-method">{$t('schedule.contactMethod')}</Label>
-					<Select.Root type="single" bind:value={contactMethod} onValueChange={() => contact = ''}>
-						<Select.Trigger id="schedule-contact-method" class="data-[size=default]:h-11 w-full bg-muted/15 shadow-xs">
-							{$t(contactMethod === 'email' ? 'schedule.email' : 'schedule.phone')}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="email" label={$t('schedule.email')}>{$t('schedule.email')}</Select.Item>
-							<Select.Item value="phone" label={$t('schedule.phone')}>{$t('schedule.phone')}</Select.Item>
-						</Select.Content>
-					</Select.Root>
-				</div>
-				<div class="space-y-2">
+			<div class="space-y-1.5">
+				<div class="flex items-center justify-between gap-3">
 					<Label for="schedule-contact">{$t(contactMethod === 'email' ? 'schedule.email' : 'schedule.phone')}</Label>
-					{#if contactMethod === 'phone'}
-						<PhoneField id="schedule-contact" bind:value={contact} />
-					{:else}
-						<Input id="schedule-contact" class="h-11 bg-muted/15 shadow-xs" type="email" bind:value={contact} required />
-					{/if}
+					<div class="flex rounded-md border p-0.5 text-xs" role="group" aria-label={$t('schedule.contactMethod')}>
+						{#each ['phone', 'email'] as const as method (method)}
+							<button type="button" aria-pressed={contactMethod === method}
+								onclick={() => { if (contactMethod !== method) { contactMethod = method; contact = ''; } }}
+								class="rounded px-2.5 py-0.5 font-medium transition-colors {contactMethod === method ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground'}">
+								{$t(method === 'email' ? 'schedule.email' : 'schedule.phone')}
+							</button>
+						{/each}
+					</div>
 				</div>
+				{#if contactMethod === 'phone'}
+					<PhoneField id="schedule-contact" bind:value={contact} />
+				{:else}
+					<Input id="schedule-contact" class="h-10" type="email" bind:value={contact} required />
+				{/if}
 			</div>
 		{/if}
 
-		{#if kind === 'booking' || kind === 'break' || (kind === 'details' && editing)}
-			<div class="grid grid-cols-2 gap-4">
-				<div class="space-y-2 {kind === 'break' ? '' : 'col-span-2'}">
+		{#if kind === 'booking' || (kind === 'details' && editing)}
+			<div class="grid grid-cols-2 gap-x-3 gap-y-3">
+				<div class="space-y-1.5">
 					<Label for="schedule-date">{$t('schedule.date')}</Label>
-					<div class="flex items-center gap-1.5">
-						{#if kind !== 'break'}
-							<Button type="button" variant="outline" size="icon" class="h-11 w-9 shrink-0" aria-label={$t('schedule.previousDay')} onclick={() => shiftDate(-1)}><ChevronLeft class="size-4" /></Button>
-						{/if}
-						<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone}
-							class="h-11 min-w-0 flex-1 bg-muted/15 shadow-xs" />
-						{#if kind !== 'break'}
-							<Button type="button" variant="outline" size="icon" class="h-11 w-9 shrink-0" aria-label={$t('schedule.nextDay')} onclick={() => shiftDate(1)}><ChevronRight class="size-4" /></Button>
-						{/if}
+					<div class="flex items-center gap-1">
+						<Button type="button" variant="outline" size="icon" class="size-10 shrink-0" aria-label={$t('schedule.previousDay')} onclick={() => shiftDate(-1)}><ChevronLeft class="size-4" /></Button>
+						<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone} class="h-10 min-w-0 flex-1 px-2 text-sm" />
+						<Button type="button" variant="outline" size="icon" class="size-10 shrink-0" aria-label={$t('schedule.nextDay')} onclick={() => shiftDate(1)}><ChevronRight class="size-4" /></Button>
 					</div>
-					{#if kind !== 'break'}
-						<div class="flex gap-1.5">
-							<Button type="button" variant="ghost" size="sm" class="h-7 px-2 text-xs" onclick={() => setDate(0)}>{$t('schedule.today')}</Button>
-							<Button type="button" variant="ghost" size="sm" class="h-7 px-2 text-xs" onclick={() => setDate(1)}>{$t('schedule.tomorrow')}</Button>
-						</div>
-					{/if}
 				</div>
-				{#if kind === 'break'}
-					<div class="space-y-2">
-						<Label for="schedule-start">{$t('schedule.start')}</Label>
-						<TimePicker id="schedule-start" label={$t('schedule.start')} bind:value={start} />
-					</div>
-				{:else}
-					<div class="col-span-2 space-y-2">
-						<Label for="schedule-start">{$t('schedule.start')}</Label>
-						<SlotPicker id="schedule-start" label={$t('schedule.start')} bind:value={start} starts={startList} />
-					</div>
-					<div class="col-span-2 space-y-2">
-						<Label for="schedule-duration">{$t('schedule.duration')}</Label>
-						<DurationChips id="schedule-duration" bind:value={duration} />
-						{#if endsAt}<p class="text-xs tabular-nums text-muted-foreground">{$t('schedule.endsAt', { time: endsAt })}</p>{/if}
-					</div>
-				{/if}
+				<div class="space-y-1.5">
+					<Label for="schedule-start">{$t('schedule.start')}</Label>
+					<TimeInput id="schedule-start" label={$t('schedule.start')} bind:value={start} invalid={slotsReady && clockRe.test(start) && !timeAvailable} />
+				</div>
+				<div class="col-span-2">
+					<SlotSuggestions bind:value={start} starts={startList} />
+				</div>
+				<div class="col-span-2 space-y-1.5">
+					<Label for="schedule-duration">{$t('schedule.duration')}</Label>
+					<DurationChips id="schedule-duration" bind:value={duration} {endsAt} />
+				</div>
 			</div>
-			{#if kind === 'break'}
-				<div class="grid grid-cols-2 gap-4">
-					<div class="space-y-2">
-						<Label for="schedule-end">{$t('schedule.end')}</Label>
-						<TimePicker id="schedule-end" label={$t('schedule.end')} bind:value={end} />
-					</div>
-					<div class="space-y-2">
-						<Label for="schedule-break-title">{$t('schedule.breakTitle')}</Label>
-						<Input id="schedule-break-title" class="h-11 bg-muted/15 shadow-xs" bind:value={title} placeholder={$t('doctorBreaks.defaultTitle')} />
-					</div>
+		{:else if kind === 'break'}
+			<div class="grid grid-cols-2 gap-x-3 gap-y-3">
+				<div class="col-span-2 space-y-1.5">
+					<Label for="schedule-date">{$t('schedule.date')}</Label>
+					<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone} class="h-10 w-full" />
 				</div>
-			{/if}
+				<div class="space-y-1.5">
+					<Label for="schedule-start">{$t('schedule.start')}</Label>
+					<TimeInput id="schedule-start" label={$t('schedule.start')} bind:value={start} />
+				</div>
+				<div class="space-y-1.5">
+					<Label for="schedule-end">{$t('schedule.end')}</Label>
+					<TimeInput id="schedule-end" label={$t('schedule.end')} bind:value={end} />
+				</div>
+				<div class="col-span-2 space-y-1.5">
+					<Label for="schedule-break-title">{$t('schedule.breakTitle')}</Label>
+					<Input id="schedule-break-title" class="h-10" bind:value={title} placeholder={$t('doctorBreaks.defaultTitle')} />
+				</div>
+			</div>
 		{/if}
 		{#if kind === 'dayOff'}
 			<div class="space-y-2">
 				<Label for="schedule-day-off-date">{$t('schedule.date')}</Label>
-				<DatePicker id="schedule-day-off-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone} class="h-11 w-full bg-muted/15 shadow-xs" />
+				<DatePicker id="schedule-day-off-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone} class="h-10 w-full" />
 			</div>
 		{/if}
 		{#if needsAvailability}
@@ -395,7 +382,7 @@
 		{#if kind === 'booking' || kind === 'dayOff' || editing}
 			<div class="space-y-2">
 				<Label for="schedule-notes">{$t(kind === 'dayOff' ? 'schedule.dayOffReason' : 'schedule.notes')} <span class="font-normal text-muted-foreground">{$t('common.optional')}</span></Label>
-				<Textarea id="schedule-notes" bind:value={notes} rows={3} maxlength={5000} class="resize-y bg-muted/15 shadow-xs" />
+				<Textarea id="schedule-notes" bind:value={notes} rows={2} maxlength={5000} class="resize-none" />
 			</div>
 		{/if}
 		{#if error}<p role="alert" class="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>{/if}

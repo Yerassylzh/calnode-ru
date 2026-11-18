@@ -4,6 +4,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import { t, localeTag } from '$lib/i18n';
+	import { prefs } from '$lib/prefs';
 	import { cn } from '$lib/utils.js';
 
 	let {
@@ -38,7 +39,7 @@
 	function fmt(iso: string) {
 		try {
 			return parseDate(iso).toDate(tz).toLocaleDateString($localeTag, {
-				day: 'numeric', month: 'short', year: 'numeric'
+				weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
 			});
 		} catch { return iso; }
 	}
@@ -69,6 +70,7 @@
 			onValueChange={onCalChange}
 			{minValue}
 			locale={$localeTag}
+			weekStartsOn={$prefs.week_start as 0 | 1 | 2 | 3 | 4 | 5 | 6}
 		/>
 	</Popover.Content>
 </Popover.Root>

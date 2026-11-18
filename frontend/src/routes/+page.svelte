@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import { parseDate, parseDateTime, today, toZoned, type CalendarDate } from '@internationalized/date';
-	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Keyboard, Plus, RefreshCw, Settings2, UserRound, WifiOff } from '@lucide/svelte';
+	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Plus, UserRound, WifiOff } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { api, type Booking, type DoctorBreak, type ScheduleDay, type TeamMember } from '$lib/api';
 	import { currentUser } from '$lib/stores';
@@ -17,7 +17,6 @@
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
-	import * as Dialog from '$lib/components/ui/dialog';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Select from '$lib/components/ui/select';
 	import * as Popover from '$lib/components/ui/popover';
@@ -38,11 +37,7 @@
 	let focus = $state<CalendarDate>(today('UTC'));
 	let view = $state<'week' | 'day'>('week');
 	let jumpOpen = $state(false);
-	let helpOpen = $state(false);
-	const shortcuts = [
-		['\u2190  \u2192', 'schedule.shortcuts.step'], ['T', 'schedule.shortcuts.today'], ['N', 'schedule.shortcuts.new'],
-		['W', 'schedule.shortcuts.week'], ['D', 'schedule.shortcuts.day'], ['Esc', 'schedule.shortcuts.close'], ['\u2725', 'schedule.shortcuts.drag'], ['?', 'schedule.shortcuts.help']
-	];
+	let addOpen = $state(false);
 	let loaded = $state(false);
 	const days = $derived(view === 'week' ? Array.from({ length: 7 }, (_, i) => week.add({ days: i })) : [focus]);
 	let bookings = $state<Booking[]>([]);
@@ -73,7 +68,6 @@
 	// blocks that just arrived or changed remotely; `remoteNotice` warns an open booking form.
 	let lastUpdated = $state<Date | null>(null);
 	let liveFailed = $state(false);
-	let refreshing = $state(false);
 	let pulse = $state<Set<string>>(new Set());
 	let remoteNotice = $state<'' | 'changed' | 'cancelled' | 'removed'>('');
 	let remoteFresh = $state<Booking | undefined>();
@@ -235,18 +229,6 @@
 		await load({ silent: true, notify: true, breaks: ++pollTick % 4 === 0 });
 	}
 
-	async function refreshNow() {
-		if (refreshing || !staffID) return;
-		refreshing = true;
-		try {
-			await load({ silent: true, notify: true, breaks: true });
-		} catch {
-			// liveFailed already reflects it
-		} finally {
-			refreshing = false;
-		}
-	}
-
 	function message(error: unknown) {
 		return error instanceof Error ? error.message : $t('schedule.loadFailed');
 	}
@@ -406,40 +388,11 @@
 		else goToDay(focus.add({ days: direction }));
 	}
 
-	function goToday() {
-		const now = today(timezone);
-		if (view === 'week') goToWeek(weekOf(now), now);
-		else goToDay(now);
-	}
-
 	function jumpTo(date: CalendarDate | undefined) {
 		if (!date) return;
 		jumpOpen = false;
 		if (view === 'week') goToWeek(weekOf(date), date);
 		else goToDay(date);
-	}
-
-	// Keyboard: arrows move, T = today, N = new booking, D/W = day/week view. Ignored while typing
-	// or while any dialog/menu is open (and for physical keys, so it works on any keyboard layout).
-	function onKey(event: KeyboardEvent) {
-		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || dialogOpen || jumpOpen || helpOpen || !staffID) return;
-		const el = event.target;
-		if (el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('[role=dialog],[role=listbox],[role=menu]'))) return;
-		if (event.key === '?') {
-			helpOpen = true;
-			event.preventDefault();
-			return;
-		}
-		switch (event.code) {
-			case 'ArrowLeft': step(-1); break;
-			case 'ArrowRight': step(1); break;
-			case 'KeyT': goToday(); break;
-			case 'KeyN': open('booking'); break;
-			case 'KeyD': setView('day'); break;
-			case 'KeyW': setView('week'); break;
-			default: return;
-		}
-		event.preventDefault();
 	}
 
 	function open(kind: Editor, date = defaultDate(), time = '09:00', item?: Booking | DoctorBreak | ScheduleDay, at: Anchor | null = null) {
@@ -582,46 +535,32 @@
 
 <svelte:head><title>{$t('schedule.title')} — Calnode</title></svelte:head>
 
-<svelte:window onkeydown={onKey} />
-
 <div class="mx-auto flex h-full min-h-0 max-w-[1800px] flex-col gap-4 px-4 py-4 sm:px-7 sm:py-6">
-	<header class="flex shrink-0 flex-wrap items-center gap-3">
+	<header class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
 		<h1 class="mr-1 text-2xl font-semibold tracking-tight max-sm:hidden">{$t('schedule.title')}</h1>
-		<div class="flex flex-wrap items-center gap-1 max-sm:w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:pb-0.5 max-sm:[&>*]:shrink-0">
-			<Button variant="outline" size="sm" onclick={goToday} disabled={!staffID}>{$t('schedule.today')}</Button>
+		<div class="flex items-center gap-1">
 			<Button variant="ghost" size="icon" aria-label={$t(view === 'week' ? 'schedule.previous' : 'schedule.previousDay')} onclick={() => step(-1)}><ChevronLeft class="size-4" /></Button>
 			<Button variant="ghost" size="icon" aria-label={$t(view === 'week' ? 'schedule.next' : 'schedule.nextDay')} onclick={() => step(1)}><ChevronRight class="size-4" /></Button>
 			<Popover.Root bind:open={jumpOpen}>
-				<Popover.Trigger disabled={!staffID} class={buttonVariants({ variant: 'ghost', size: 'sm' }) + ' text-sm font-medium whitespace-nowrap'} aria-label={$t('schedule.jumpToDate') + ' · ' + rangeLabel}>
+				<Popover.Trigger disabled={!staffID} class={buttonVariants({ variant: 'ghost', size: 'sm' }) + ' text-sm font-medium whitespace-nowrap'} aria-label={$t('schedule.jumpToDate') + ' \u00b7 ' + rangeLabel}>
 					{rangeLabel}
 				</Popover.Trigger>
 				<Popover.Content class="w-auto p-0" align="start">
 					<Calendar value={focus} onValueChange={(value) => jumpTo(value as CalendarDate | undefined)} locale={$localeTag} weekStartsOn={$prefs.week_start as 0 | 1 | 2 | 3 | 4 | 5 | 6} />
 				</Popover.Content>
 			</Popover.Root>
-			<div class="ml-1 flex rounded-md border p-0.5" role="group" aria-label={$t('schedule.view')}>
-				{#each ['week', 'day'] as const as option (option)}
-					<Button size="sm" variant={view === option ? 'secondary' : 'ghost'} class="h-7 px-2.5" aria-pressed={view === option} disabled={!staffID} onclick={() => setView(option)}>{$t(option === 'week' ? 'schedule.view.week' : 'schedule.view.day')}</Button>
-				{/each}
-			</div>
 		</div>
-		<div class="ml-auto flex flex-wrap items-center gap-2 max-sm:ml-0 max-sm:w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:pb-0.5 max-sm:[&>*]:shrink-0">
-			<div class="flex items-center gap-1 text-xs text-muted-foreground">
-				{#if liveFailed}
-					<span role="status" class="flex items-center gap-1 text-amber-700 dark:text-amber-400"><WifiOff class="size-3.5" />{$t('schedule.live.offline')}</span>
-				{:else if lastUpdated}
-					<span class="hidden tabular-nums lg:inline">{$t('schedule.live.updatedAt', { time: lastUpdated.toLocaleTimeString($localeTag, { hour: '2-digit', minute: '2-digit', hour12: $prefs.time_format === '12h' }) })}</span>
-				{/if}
-				<Button variant="ghost" size="icon" class="size-8" onclick={() => (helpOpen = true)} aria-label={$t('schedule.shortcuts.title')} title={$t('schedule.shortcuts.title') + ' (?)'}>
-					<Keyboard class="size-3.5" />
-				</Button>
-				<Button variant="ghost" size="icon" class="size-8" onclick={refreshNow} disabled={!staffID || refreshing}
-					aria-label={$t('schedule.live.refresh')} title={$t('schedule.live.refresh')}>
-					<RefreshCw class="size-3.5 {refreshing ? 'animate-spin' : ''}" />
-				</Button>
-			</div>
+		<div class="flex rounded-md border p-0.5" role="group" aria-label={$t('schedule.view')}>
+			{#each ['week', 'day'] as const as option (option)}
+				<Button size="sm" variant={view === option ? 'secondary' : 'ghost'} class="h-7 px-2.5" aria-pressed={view === option} disabled={!staffID} onclick={() => setView(option)}>{$t(option === 'week' ? 'schedule.view.week' : 'schedule.view.day')}</Button>
+			{/each}
+		</div>
+		<div class="ml-auto flex items-center gap-2">
+			{#if liveFailed}
+				<span role="status" class="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400"><WifiOff class="size-3.5" /><span class="max-sm:sr-only">{$t('schedule.live.offline')}</span></span>
+			{/if}
 			<Select.Root type="single" value={staffID} onValueChange={(value) => { staffID = value; syncUrl(); void load(); }}>
-				<Select.Trigger class="data-[size=default]:h-9 w-[180px] bg-background shadow-xs" aria-label={$t('schedule.staff')} disabled={!staff.length}>
+				<Select.Trigger class="data-[size=default]:h-9 w-[190px] bg-background shadow-xs max-sm:w-[150px]" aria-label={$t('schedule.staff')} disabled={!staff.length}>
 					<span class="flex min-w-0 items-center gap-2"><UserRound class="size-4 text-muted-foreground" /><span class="truncate">{staff.find((member) => member.id === staffID)?.name || staff.find((member) => member.id === staffID)?.email || $t('common.select')}</span></span>
 				</Select.Trigger>
 				<Select.Content>
@@ -630,15 +569,23 @@
 					{/each}
 				</Select.Content>
 			</Select.Root>
-			<Button variant="ghost" size="icon" href={base + '/availability?' + new URLSearchParams({ staff_id: staffID })}
-				aria-label={$t('availability.weeklyHours')} title={$t('availability.weeklyHours')}><Settings2 class="size-4" /></Button>
-			<Button variant="outline" onclick={() => open('break')} disabled={!staffID || loading} aria-label={$t('schedule.addBreak')}>
-				<Coffee class="size-4" /><span class="hidden xl:inline">{$t('schedule.addBreak')}</span>
-			</Button>
-			<Button variant="outline" onclick={() => open('dayOff')} disabled={!staffID || loading} aria-label={$t('schedule.addDayOff')} title={$t('schedule.addDayOff')}>
-				<CalendarOff class="size-4" /><span class="hidden xl:inline">{$t('schedule.dayOff')}</span>
-			</Button>
-			<Button onclick={() => open('booking')} disabled={!staffID || loading}><Plus class="size-4" />{$t('schedule.newBooking')}</Button>
+			<Popover.Root bind:open={addOpen}>
+				<Popover.Trigger disabled={!staffID || loading} class={buttonVariants({ size: 'icon' }) + ' size-9'} aria-label={$t('schedule.add')} title={$t('schedule.add')}>
+					<Plus class="size-5" />
+				</Popover.Trigger>
+				<Popover.Content align="end" class="w-60 p-1.5">
+					{#each [
+						{ icon: Plus, key: 'schedule.newBooking', kind: 'booking' },
+						{ icon: Coffee, key: 'schedule.addBreak', kind: 'break' },
+						{ icon: CalendarOff, key: 'schedule.addDayOff', kind: 'dayOff' }
+					] as item (item.kind)}
+						<button type="button" class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent"
+							onclick={() => { addOpen = false; open(item.kind as Editor); }}>
+							<item.icon class="size-4 text-muted-foreground" />{$t(item.key)}
+						</button>
+					{/each}
+				</Popover.Content>
+			</Popover.Root>
 		</div>
 	</header>
 
@@ -689,20 +636,3 @@
 <ConfirmDialog bind:open={moveOpen} title={$t('schedule.move.title')} description={moveText} confirmText={$t('schedule.move.confirm')} onConfirm={confirmMove} />
 <ConfirmDialog bind:open={cancelOpen} title={$t('schedule.cancelBooking')} description={$t('schedule.cancelHelp')} confirmText={$t('schedule.cancelBooking')} destructive onConfirm={cancelBooking} />
 <ConfirmDialog bind:open={removalOpen} title={removalText.title} description={removalText.description} confirmText={$t('common.delete')} destructive onConfirm={confirmRemoval} />
-
-<Dialog.Root bind:open={helpOpen}>
-	<Dialog.Content class="sm:max-w-sm">
-		<Dialog.Header>
-			<Dialog.Title>{$t('schedule.shortcuts.title')}</Dialog.Title>
-			<Dialog.Description>{$t('schedule.shortcuts.hint')}</Dialog.Description>
-		</Dialog.Header>
-		<dl class="space-y-2 text-sm">
-			{#each shortcuts as [keys, label] (keys)}
-				<div class="flex items-center justify-between gap-4">
-					<dt class="text-muted-foreground">{$t(label)}</dt>
-					<dd><kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">{keys}</kbd></dd>
-				</div>
-			{/each}
-		</dl>
-	</Dialog.Content>
-</Dialog.Root>
