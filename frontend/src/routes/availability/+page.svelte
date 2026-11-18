@@ -287,6 +287,8 @@
 		}
 	});
 
+	// Catalog keys are camelCase; the API enum is snake_case.
+	const REASON_KEY: Record<OverrideReason, string> = { day_off: 'availability.reason.dayOff', out_of_office: 'availability.reason.outOfOffice', custom_hours: 'availability.reason.customHours' };
 	const REASON_OPTIONS: OverrideReason[] = ['day_off', 'out_of_office', 'custom_hours'];
 
 	// Time-of-day options for the start/end selects, formatted per the user's prefs.
@@ -520,10 +522,10 @@
 				<div class="space-y-1.5">
 					<label for="ov-type" class="text-sm font-medium">{$t('availability.type')}</label>
 					<Select.Root type="single" value={ovForm.reason} onValueChange={(v) => { if (v) ovForm.reason = v as OverrideReason; }}>
-						<Select.Trigger id="ov-type" class="w-fit">{$t(`availability.reason.${ovForm.reason}`)}</Select.Trigger>
+						<Select.Trigger id="ov-type" class="w-fit">{$t(REASON_KEY[ovForm.reason])}</Select.Trigger>
 						<Select.Content>
 							{#each REASON_OPTIONS as r}
-								<Select.Item value={r} label={$t(`availability.reason.${r}`)}>{$t(`availability.reason.${r}`)}</Select.Item>
+								<Select.Item value={r} label={$t(REASON_KEY[r])}>{$t(REASON_KEY[r])}</Select.Item>
 							{/each}
 						</Select.Content>
 					</Select.Root>

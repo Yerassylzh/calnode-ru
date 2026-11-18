@@ -11,15 +11,11 @@
 	const navItems = $derived([
 		{ section: $t('settingsLayout.section.account'), href: `${base}/settings/profile`, label: $t('settingsLayout.nav.profile') },
 		{ section: $t('settingsLayout.section.account'), href: `${base}/settings/notifications`, label: $t('settingsLayout.nav.notifications') },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/branding`, label: $t('settingsLayout.nav.branding'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/email`, label: $t('settingsLayout.nav.email'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/google`, label: $t('settingsLayout.nav.googleOAuth'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/zoom`, label: $t('settingsLayout.nav.zoom'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/video`, label: $t('settingsLayout.nav.video'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/storage`, label: $t('settingsLayout.nav.storage'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/payments`, label: $t('settingsLayout.nav.payments'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/ai`, label: $t('settingsLayout.nav.ai'), adminOnly: true },
-		{ section: $t('settingsLayout.section.workspace'), href: `${base}/settings/tracking`, label: $t('settingsLayout.nav.tracking'), adminOnly: true },
+		// Workspace-level configuration that has no other UI. Kept out of the way until each
+		// has a documented non-UI path (see dev_docs/plan/002, section 8).
+		{ section: $t('settingsLayout.section.advanced'), href: `${base}/settings/email`, label: $t('settingsLayout.nav.email'), adminOnly: true },
+		{ section: $t('settingsLayout.section.advanced'), href: `${base}/settings/video`, label: $t('settingsLayout.nav.video'), adminOnly: true },
+		{ section: $t('settingsLayout.section.advanced'), href: `${base}/settings/storage`, label: $t('settingsLayout.nav.storage'), adminOnly: true },
 	]);
 
 	const visibleNavItems = $derived(navItems.filter((item) => !item.adminOnly || $currentUser?.is_admin));

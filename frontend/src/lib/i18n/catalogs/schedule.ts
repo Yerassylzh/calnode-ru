@@ -3,7 +3,6 @@ import type { CatalogEntry } from '../index';
 export const en: Record<string, CatalogEntry> = {
 	'schedule.title': 'Calendar',
 	'schedule.staff': 'Staff member',
-	'schedule.calendarConnections': 'Integrations',
 	'schedule.appointment': 'Appointment',
 	'schedule.bookingDetails': 'Booking details',
 	'schedule.cancelBooking': 'Cancel booking',
@@ -51,7 +50,6 @@ export const en: Record<string, CatalogEntry> = {
 export const ru: Record<string, CatalogEntry> = {
 	'schedule.title': 'Календарь',
 	'schedule.staff': 'Сотрудник',
-	'schedule.calendarConnections': 'Интеграции',
 	'schedule.appointment': 'Запись',
 	'schedule.bookingDetails': 'Детали записи',
 	'schedule.cancelBooking': 'Отменить запись',

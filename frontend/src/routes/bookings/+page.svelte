@@ -27,7 +27,6 @@
 	// work to render 25 rows.
 	let timeFilter = $state<'upcoming' | 'past'>('upcoming');
 	let fHost = $state('');
-	let fTeam = $state('');
 	let fStatus = $state('');
 
 	const PAGE_SIZE = 25;
@@ -37,9 +36,8 @@
 
 	// Options for the filter selects, fetched once.
 	let members = $state<{ id: string; name: string }[]>([]);
-	let teams = $state<{ id: string; name: string }[]>([]);
 
-	const hasFilters = $derived(!!(fHost || fTeam || fStatus));
+	const hasFilters = $derived(!!(fHost || fStatus));
 	const pageStart = $derived(total === 0 ? 0 : offset + 1);
 	const pageEnd = $derived(Math.min(offset + items.length, total));
 	let reschedulingId = $state<string | null>(null);
@@ -79,7 +77,6 @@
 		// a page in the browser would only ever sort that page.
 		p.set('order', timeFilter === 'past' ? 'desc' : 'asc');
 		if (fHost) p.set('host', fHost);
-		if (fTeam) p.set('team', fTeam);
 		if (fStatus) p.set('status', fStatus);
 		p.set('limit', String(PAGE_SIZE));
 		p.set('offset', String(offset));
@@ -134,7 +131,7 @@
 		if (scope === s) return;
 		scope = s;
 		// Host and team only mean anything across the workspace.
-		if (s === 'mine') { fHost = ''; fTeam = ''; }
+		if (s === 'mine') { fHost = ''; }
 		await reload();
 	}
 
@@ -145,7 +142,7 @@
 	}
 
 	function clearFilters() {
-		fHost = fTeam = fStatus = '';
+		fHost = fStatus = '';
 		reload();
 	}
 
@@ -163,10 +160,6 @@
 			// /v1/users returns a bare array, not an { items } envelope like the others.
 			// Archived members are excluded by default, which is what we want here.
 			members = (await api.get<{ id: string; name: string }[]>('/v1/users')) ?? [];
-		} catch { /* leave the dropdown empty */ }
-		try {
-			const res = await api.get<{ items: { id: string; name: string }[] }>('/v1/teams');
-			teams = res.items ?? [];
 		} catch { /* leave the dropdown empty */ }
 	}
 
@@ -329,19 +322,6 @@
 					</Select.Content>
 				</Select.Root>
 
-				{#if teams.length > 0}
-					<Select.Root type="single" bind:value={fTeam} onValueChange={reload}>
-						<Select.Trigger class="h-9 w-[140px]" aria-label={$t('bookings.filters.teamAria')}>
-							{teams.find((tm) => tm.id === fTeam)?.name ?? $t('bookings.filters.allTeams')}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="" label={$t('bookings.filters.allTeams')}>{$t('bookings.filters.allTeams')}</Select.Item>
-							{#each teams as tm}
-								<Select.Item value={tm.id} label={tm.name}>{tm.name}</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
-				{/if}
 			{/if}
 
 			<Select.Root type="single" bind:value={fStatus} onValueChange={reload}>

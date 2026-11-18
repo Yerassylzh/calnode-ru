@@ -77,7 +77,7 @@
 			return { text: $t('recordings.blocked.noKey'), href: '/admin/settings/video', label: $t('recordings.blocked.settingsVideo') };
 		}
 		if (llm && !llm.active) {
-			return { text: $t('recordings.blocked.noLLM'), href: '/admin/settings/ai', label: $t('recordings.blocked.settingsAI') };
+			return { text: $t('recordings.blocked.noLLM'), href: '', label: '' };
 		}
 		return null;
 	});
@@ -345,7 +345,7 @@
 						{:else if notesBlockedReason}
 							<p class="text-xs text-muted-foreground">
 								{notesBlockedReason.text}
-								<a href={notesBlockedReason.href} class="font-medium text-primary underline underline-offset-2">{notesBlockedReason.label}</a>
+								{#if notesBlockedReason.href}<a href={notesBlockedReason.href} class="font-medium text-primary underline underline-offset-2">{notesBlockedReason.label}</a>{/if}
 							</p>
 						{:else}
 							<p class="text-xs text-muted-foreground">No notes yet — they appear a few minutes after a recorded meeting. Use Refresh to check again.</p>

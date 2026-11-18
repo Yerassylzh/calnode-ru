@@ -36,33 +36,33 @@ describe('Admin i18n store', () => {
 
 	test('interpolation works for placeholders', () => {
 		setLocale('en');
-		expect(get(t)('settingsAI.connectionOk', { latency: 45 })).toBe('Connection OK (45 ms)');
+		expect(get(t)('bookings.filters.upcoming', { count: 45 })).toBe('Upcoming (45)');
 
 		setLocale('ru');
-		expect(get(t)('settingsAI.connectionOk', { latency: 45 })).toBe('Подключение успешно (45 мс)');
+		expect(get(t)('bookings.filters.upcoming', { count: 45 })).toBe('Предстоящие (45)');
 	});
 
 	test('Intl.PluralRules handles Russian plural forms (0, 1, 2, 5, 11, 21, 22, 25)', () => {
 		setLocale('en');
 		const tEn = get(t);
-		expect(tEn.plural('webhooks.table.fieldsCount', 1)).toBe('1 field');
-		expect(tEn.plural('webhooks.table.fieldsCount', 2)).toBe('2 fields');
-		expect(tEn.plural('webhooks.table.fieldsCount', 5)).toBe('5 fields');
+		expect(tEn.plural('availability.spanDuration', 1)).toBe('1 day');
+		expect(tEn.plural('availability.spanDuration', 2)).toBe('2 days');
+		expect(tEn.plural('availability.spanDuration', 5)).toBe('5 days');
 
 		setLocale('ru');
 		const tRu = get(t);
 		// In Russian:
-		// 1, 21 -> one ("поле")
-		// 2, 3, 4, 22 -> few ("поля")
-		// 0, 5, 6..20, 25 -> many ("полей")
-		expect(tRu.plural('webhooks.table.fieldsCount', 1)).toBe('1 поле');
-		expect(tRu.plural('webhooks.table.fieldsCount', 21)).toBe('21 поле');
-		expect(tRu.plural('webhooks.table.fieldsCount', 2)).toBe('2 поля');
-		expect(tRu.plural('webhooks.table.fieldsCount', 22)).toBe('22 поля');
-		expect(tRu.plural('webhooks.table.fieldsCount', 0)).toBe('0 полей');
-		expect(tRu.plural('webhooks.table.fieldsCount', 5)).toBe('5 полей');
-		expect(tRu.plural('webhooks.table.fieldsCount', 11)).toBe('11 полей');
-		expect(tRu.plural('webhooks.table.fieldsCount', 25)).toBe('25 полей');
+		// 1, 21 -> one ("день")
+		// 2, 3, 4, 22 -> few ("дня")
+		// 0, 5, 6..20, 25 -> many ("дней")
+		expect(tRu.plural('availability.spanDuration', 1)).toBe('1 день');
+		expect(tRu.plural('availability.spanDuration', 21)).toBe('21 день');
+		expect(tRu.plural('availability.spanDuration', 2)).toBe('2 дня');
+		expect(tRu.plural('availability.spanDuration', 22)).toBe('22 дня');
+		expect(tRu.plural('availability.spanDuration', 0)).toBe('0 дней');
+		expect(tRu.plural('availability.spanDuration', 5)).toBe('5 дней');
+		expect(tRu.plural('availability.spanDuration', 11)).toBe('11 дней');
+		expect(tRu.plural('availability.spanDuration', 25)).toBe('25 дней');
 	});
 
 	test('fmtDateIntl and fmtNumberIntl respect active locale', () => {
