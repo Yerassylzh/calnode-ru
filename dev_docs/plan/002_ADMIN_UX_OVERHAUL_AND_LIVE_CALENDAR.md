@@ -1,6 +1,6 @@
 ﻿# 002 — Admin UX overhaul: leaner navigation, enterprise-grade calendar interactions, live bookings
 
-Status: Phases 0-5 implemented (2026-11-18, see sections 10-14); Phases 6-7 not started.
+Status: Phases 0-6 implemented in part (2026-11-18, see sections 10-15); Phase 7 not started.
 Prepared: 2026-11-18.
 
 ## 1. Objective and ground rules
@@ -348,3 +348,11 @@ Shipped (frontend only):
 Verification: `pnpm check` 0 errors, `pnpm test:visual` 49/49 (11 new for slots and phone). Against the mock API in the in-app browser: the booking popover listed 09:00-16:00 chips for a 60 min booking with the current time selected and "Ends at 11:00"; choosing 11:00 then 30 min gave "Ends at 11:30"; next-day/Today/Tomorrow moved the date; a new booking via the header button normalised `8 (701) 123-45-67` to `+77011234567`, rejected `12345` with a message, and produced the toast "Booking created: Иванова Анна · 18 Wed, 09:00"; the Bookings page reschedule button opened the shared form with 49 slot chips and no legacy inline inputs. Go not run; availability in the mock ignores other bookings, so conflict (409) handling was not exercised.
 
 Not done from section 4.3/4.4: dimming days without availability in the date picker, existing-client autocomplete, a country selector for the phone field (default country is +7), inline click-to-edit notes with autosave, and drag-to-reschedule.
+
+## 15. Phase 6 implementation record (2026-11-18) - polish (partial)
+
+Shipped (frontend only): a keyboard-shortcuts dialog (`?` or the keyboard button in the calendar header, listing arrows, T, N, W, D, Esc); a skeleton for the calendar's first load (new shadcn-style `ui/skeleton`) with a screen-reader "Loading" status; the collapsible icon rail from section 3.4 (desktop only, remembered in `localStorage`, labels become tooltips/screen-reader text, phone menu unchanged); Russian copy fix for the discard confirmation ("Закрыть без сохранения" / "Продолжить редактирование" instead of the ambiguous "Отменить изменения").
+
+Verification: `pnpm check` 0 errors, `pnpm test:visual` 49/49, build OK. In the browser against the mock API: the rail collapsed to 56 px, persisted across a reload, and the toggle state flipped back; `?` opened the dialog with all seven shortcuts. Width/fade animations did not finish in the throttled pane, so final widths after toggling back were not observed.
+
+**Not done:** an automated accessibility audit (injecting axe-core from a CDN was blocked, so none was run; run it locally before release), drag-to-move/resize, the user dropdown menu (needs the shadcn `dropdown-menu`), the mobile sheet menu, merging Settings into one page, compacting the calendar header on phones (still wraps to about 330 px), and a full Russian copy review of the older catalogs.

@@ -12,7 +12,7 @@
 	import DemoBanner from '$lib/components/demo-banner.svelte';
 	import LocaleSwitcher from '$lib/components/locale-switcher.svelte';
 	import { t } from '$lib/i18n';
-	import { CalendarDays, Clock, KeyRound, List, LogOut, Menu, MessageSquareWarning, Settings, Users, Video } from '@lucide/svelte';
+	import { CalendarDays, Clock, KeyRound, List, LogOut, Menu, MessageSquareWarning, PanelLeftClose, PanelLeftOpen, Settings, Users, Video } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -20,6 +20,12 @@
 	let checking = $state(true);
 	let reportOpen = $state(false);
 	let scheduleMenuOpen = $state(false);
+	// Desktop-only icon rail, remembered per browser. The phone menu always shows full labels.
+	let collapsed = $state(false);
+	function toggleCollapsed() {
+		collapsed = !collapsed;
+		try { localStorage.setItem('calnode.sidebar', collapsed ? 'collapsed' : 'open'); } catch { /* storage unavailable */ }
+	}
 	let recordingsConfigured = $state(false);
 	let version = $state('');
 
@@ -73,6 +79,7 @@
 	}
 
 	onMount(async () => {
+		try { collapsed = localStorage.getItem('calnode.sidebar') === 'collapsed'; } catch { /* storage unavailable */ }
 		if (isPublicRoute) {
 			checking = false;
 			return;
@@ -149,11 +156,12 @@
 	{/if}
 	<div class="relative flex flex-1 overflow-hidden">
 		<!-- Sidebar -->
-		<aside id="admin-sidebar" class="w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar {isSchedule
+		<aside id="admin-sidebar" class="w-56 shrink-0 flex-col transition-[width] {collapsed ? 'sm:w-14' : ''} border-r border-sidebar-border bg-sidebar {isSchedule
 			? (scheduleMenuOpen ? 'absolute inset-y-0 left-0 z-10 flex overflow-y-auto shadow-lg sm:static sm:shadow-none' : 'hidden sm:flex')
 			: 'flex'}">
 			<!-- User section -->
-			<a href="{base}/settings/profile" class="flex items-center gap-3 border-b border-sidebar-border px-4 py-3 hover:bg-sidebar-accent/60 transition-colors">
+			<a href="{base}/settings/profile" class="flex items-center gap-3 border-b border-sidebar-border px-4 py-3 transition-colors hover:bg-sidebar-accent/60 {collapsed ? 'sm:justify-center sm:px-0' : ''}"
+				title={collapsed ? ($currentUser?.name ?? '') : undefined}>
 				<!-- Fixed-size clip container: the image fills it and is clipped by the
 				     parent's overflow-hidden (not its own border-radius). A rounded,
 				     object-cover image on its own composited layer gets mis-painted by
@@ -166,7 +174,7 @@
 						{initials($currentUser?.name ?? 'U')}
 					{/if}
 				</span>
-				<div class="min-w-0 flex-1">
+				<div class="min-w-0 flex-1 {collapsed ? 'sm:hidden' : ''}">
 					<p class="truncate text-sm font-medium text-sidebar-foreground">{$currentUser?.name ?? ''}</p>
 				</div>
 			</a>
@@ -182,42 +190,51 @@
 							href={item.href}
 							onclick={() => (scheduleMenuOpen = false)}
 							aria-current={active ? 'page' : undefined}
-							class="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors
+							title={collapsed ? $t(item.labelKey) : undefined}
+							class="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors {collapsed ? 'sm:justify-center sm:px-0' : ''}
 								{active
 									? 'bg-sidebar-accent text-sidebar-accent-foreground'
 									: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'}"
 						>
 							<item.icon class="size-4 shrink-0 {active ? 'opacity-100' : 'opacity-60'}" />
-							{$t(item.labelKey)}
+							<span class={collapsed ? 'sm:sr-only' : ''}>{$t(item.labelKey)}</span>
 						</a>
 					{/each}
 				</nav>
 
 			<!-- Footer -->
 			<div class="border-t border-sidebar-border p-2">
-				<div class="px-1 pb-2">
+				<button type="button" onclick={toggleCollapsed}
+					aria-pressed={collapsed} aria-label={$t(collapsed ? 'layout.sidebar.expand' : 'layout.sidebar.collapse')} title={$t(collapsed ? 'layout.sidebar.expand' : 'layout.sidebar.collapse')}
+					class="mb-1 hidden w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/55 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/80 sm:flex {collapsed ? 'sm:justify-center sm:px-0' : ''}">
+					{#if collapsed}<PanelLeftOpen class="size-4 shrink-0" />{:else}<PanelLeftClose class="size-4 shrink-0" />{/if}
+					<span class={collapsed ? 'sm:sr-only' : ''}>{$t('layout.sidebar.collapse')}</span>
+				</button>
+				<div class="px-1 pb-2 {collapsed ? 'sm:hidden' : ''}">
 					<LocaleSwitcher class="w-full" />
 				</div>
 				<button
 					onclick={() => (reportOpen = true)}
-					class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/70"
+					class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/70 {collapsed ? 'sm:justify-center sm:px-0' : ''}"
+					title={collapsed ? $t('layout.reportIssue') : undefined}
 				>
 					<MessageSquareWarning class="size-4 shrink-0" />
-					{$t('layout.reportIssue')}
+					<span class={collapsed ? 'sm:sr-only' : ''}>{$t('layout.reportIssue')}</span>
 				</button>
 				<button
 					onclick={logout}
-					class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+					class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground {collapsed ? 'sm:justify-center sm:px-0' : ''}"
+					title={collapsed ? $t('layout.signOut') : undefined}
 				>
 					<LogOut class="size-4 shrink-0" />
-					{$t('layout.signOut')}
+					<span class={collapsed ? 'sm:sr-only' : ''}>{$t('layout.signOut')}</span>
 				</button>
 				{#if version}
 					<a
 						href={RELEASES_URL}
 						target="_blank"
 						rel="noopener noreferrer"
-						class="mt-1 block px-2.5 py-1 text-xs text-sidebar-foreground/35 transition-colors hover:text-sidebar-foreground/60"
+						class="mt-1 block px-2.5 py-1 text-xs text-sidebar-foreground/35 transition-colors hover:text-sidebar-foreground/60 {collapsed ? 'sm:hidden' : ''}"
 					>
 						{version}
 					</a>

@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import { parseDate, today, type CalendarDate } from '@internationalized/date';
-	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Plus, RefreshCw, Settings2, UserRound, WifiOff } from '@lucide/svelte';
+	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Keyboard, Plus, RefreshCw, Settings2, UserRound, WifiOff } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { api, type Booking, type DoctorBreak, type ScheduleDay, type TeamMember } from '$lib/api';
 	import { currentUser } from '$lib/stores';
@@ -16,6 +16,8 @@
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Select from '$lib/components/ui/select';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Calendar } from '$lib/components/ui/calendar';
@@ -35,6 +37,11 @@
 	let focus = $state<CalendarDate>(today('UTC'));
 	let view = $state<'week' | 'day'>('week');
 	let jumpOpen = $state(false);
+	let helpOpen = $state(false);
+	const shortcuts = [
+		['\u2190  \u2192', 'schedule.shortcuts.step'], ['T', 'schedule.shortcuts.today'], ['N', 'schedule.shortcuts.new'],
+		['W', 'schedule.shortcuts.week'], ['D', 'schedule.shortcuts.day'], ['Esc', 'schedule.shortcuts.close'], ['?', 'schedule.shortcuts.help']
+	];
 	let loaded = $state(false);
 	const days = $derived(view === 'week' ? Array.from({ length: 7 }, (_, i) => week.add({ days: i })) : [focus]);
 	let bookings = $state<Booking[]>([]);
@@ -401,9 +408,14 @@
 	// Keyboard: arrows move, T = today, N = new booking, D/W = day/week view. Ignored while typing
 	// or while any dialog/menu is open (and for physical keys, so it works on any keyboard layout).
 	function onKey(event: KeyboardEvent) {
-		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || dialogOpen || jumpOpen || !staffID) return;
+		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || dialogOpen || jumpOpen || helpOpen || !staffID) return;
 		const el = event.target;
 		if (el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('[role=dialog],[role=listbox],[role=menu]'))) return;
+		if (event.key === '?') {
+			helpOpen = true;
+			event.preventDefault();
+			return;
+		}
 		switch (event.code) {
 			case 'ArrowLeft': step(-1); break;
 			case 'ArrowRight': step(1); break;
@@ -550,6 +562,9 @@
 				{:else if lastUpdated}
 					<span class="hidden tabular-nums lg:inline">{$t('schedule.live.updatedAt', { time: lastUpdated.toLocaleTimeString($localeTag, { hour: '2-digit', minute: '2-digit', hour12: $prefs.time_format === '12h' }) })}</span>
 				{/if}
+				<Button variant="ghost" size="icon" class="size-8" onclick={() => (helpOpen = true)} aria-label={$t('schedule.shortcuts.title')} title={$t('schedule.shortcuts.title') + ' (?)'}>
+					<Keyboard class="size-3.5" />
+				</Button>
 				<Button variant="ghost" size="icon" class="size-8" onclick={refreshNow} disabled={!staffID || refreshing}
 					aria-label={$t('schedule.live.refresh')} title={$t('schedule.live.refresh')}>
 					<RefreshCw class="size-3.5 {refreshing ? 'animate-spin' : ''}" />
@@ -592,7 +607,17 @@
 			</div>
 		{/if}
 		{#if !loaded && loading}
-			<p class="px-4 py-3 text-sm text-muted-foreground" role="status">{$t('common.loading')}</p>
+			<div role="status" aria-busy="true" class="flex min-h-0 flex-1 flex-col">
+				<span class="sr-only">{$t('common.loading')}</span>
+				<div class="grid h-11 grid-cols-[56px_repeat(7,minmax(0,1fr))] border-b" aria-hidden="true">
+					<div></div>
+					{#each Array.from({ length: 7 }) as _, i (i)}<div class="flex items-center gap-2 border-l px-3"><Skeleton class="size-7 rounded-full" /><Skeleton class="h-3 w-8" /></div>{/each}
+				</div>
+				<div class="grid flex-1 grid-cols-[56px_repeat(7,minmax(0,1fr))]" aria-hidden="true">
+					<div class="space-y-12 px-3 pt-8">{#each Array.from({ length: 6 }) as _, i (i)}<Skeleton class="h-2.5 w-8" />{/each}</div>
+					{#each Array.from({ length: 7 }) as _, i (i)}<div class="space-y-6 border-l p-2 pt-10">{#each Array.from({ length: (i * 3) % 4 + 1 }) as _, j (j)}<Skeleton class="h-16 w-full" />{/each}</div>{/each}
+				</div>
+			</div>
 		{:else if !staffID}
 			<p class="px-4 py-6 text-sm text-muted-foreground">{$t('schedule.noStaff')}</p>
 		{:else}
@@ -613,3 +638,20 @@
 <ConfirmDialog bind:open={discardOpen} title={$t('schedule.discard.title')} description={$t('schedule.discard.description')} confirmText={$t('schedule.discard.confirm')} cancelText={$t('schedule.discard.keep')} destructive onConfirm={() => { dialogOpen = false; formDirty = false; }} />
 <ConfirmDialog bind:open={cancelOpen} title={$t('schedule.cancelBooking')} description={$t('schedule.cancelHelp')} confirmText={$t('schedule.cancelBooking')} destructive onConfirm={cancelBooking} />
 <ConfirmDialog bind:open={removalOpen} title={removalText.title} description={removalText.description} confirmText={$t('common.delete')} destructive onConfirm={confirmRemoval} />
+
+<Dialog.Root bind:open={helpOpen}>
+	<Dialog.Content class="sm:max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>{$t('schedule.shortcuts.title')}</Dialog.Title>
+			<Dialog.Description>{$t('schedule.shortcuts.hint')}</Dialog.Description>
+		</Dialog.Header>
+		<dl class="space-y-2 text-sm">
+			{#each shortcuts as [keys, label] (keys)}
+				<div class="flex items-center justify-between gap-4">
+					<dt class="text-muted-foreground">{$t(label)}</dt>
+					<dd><kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">{keys}</kbd></dd>
+				</div>
+			{/each}
+		</dl>
+	</Dialog.Content>
+</Dialog.Root>
