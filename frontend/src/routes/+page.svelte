@@ -9,31 +9,39 @@
 	import { api, type Booking, type DoctorBreak, type ScheduleDay, type TeamMember } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { prefs } from '$lib/prefs';
-	import { startOfWeek, clockLabel, hourLabel } from '$lib/datetime';
+	import { startOfWeek, clockLabel } from '$lib/datetime';
+	import type { Span } from '$lib/schedule/layout';
 	import { createPoller } from '$lib/live/poller';
 	import { diffBookings, isEmptyDiff } from '$lib/live/diff';
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
+	import * as Popover from '$lib/components/ui/popover';
+	import { Calendar } from '$lib/components/ui/calendar';
+	import { buttonVariants } from '$lib/components/ui/button';
 	import ScheduleForm from './schedule/schedule-form.svelte';
+	import CalendarGrid, { type GridBlock, type GridColumn } from './schedule/calendar-grid.svelte';
 
 	type Window = { start_at: string; end_at: string };
-	type Block = { id: string; start: number; end: number; label: string; kind: 'free' | 'booking' | 'break'; item?: Booking | DoctorBreak };
 	type Editor = 'booking' | 'break' | 'details' | 'removeBreak' | 'dayOff' | 'removeDayOff';
 
 	let staff = $state<Pick<TeamMember, 'id' | 'name' | 'email' | 'timezone'>[]>([]);
 	let staffID = $state('');
 	const timezone = $derived(staff.find((member) => member.id === staffID)?.timezone || 'UTC');
 	let week = $state<CalendarDate>(weekOf(today('UTC')));
-	const days = $derived(Array.from({ length: 7 }, (_, i) => week.add({ days: i })));
+	// The day shown in day view; always inside `week`, which is what gets fetched.
+	let focus = $state<CalendarDate>(today('UTC'));
+	let view = $state<'week' | 'day'>('week');
+	let jumpOpen = $state(false);
+	let loaded = $state(false);
+	const days = $derived(view === 'week' ? Array.from({ length: 7 }, (_, i) => week.add({ days: i })) : [focus]);
 	let bookings = $state<Booking[]>([]);
 	let breaks = $state<DoctorBreak[]>([]);
 	let windows = $state<Window[]>([]);
 	let scheduleDays = $state<ScheduleDay[]>([]);
 	const daysOff = $derived(new Map(scheduleDays.filter((day) => day.is_day_off).map((day) => [day.date, day])));
 	let loading = $state(true);
-	let calendarHeight = $state(0);
 	let loadError = $state('');
 	let availabilityError = $state('');
 	let version = 0;
@@ -53,26 +61,33 @@
 	let remoteFresh = $state<Booking | undefined>();
 	let pollTick = 0;
 
-	const blocks = $derived(days.map((day) => {
-		const items: Block[] = [];
+	const columns = $derived<GridColumn[]>(days.map((day) => {
+		const free: Span[] = [];
 		for (const window of windows) {
 			const span = project(day, window.start_at, window.end_at, timezone);
-			if (span) items.push({ ...span, id: window.start_at, label: $t('schedule.free'), kind: 'free' });
+			if (span) free.push(span);
 		}
+		const blocks: GridBlock[] = [];
 		for (const item of bookings) {
 			const span = project(day, item.start_at, item.end_at, timezone);
-			if (span) items.push({ ...span, id: item.id, label: item.attendees[0]?.name || $t('schedule.appointment'), kind: 'booking', item });
+			if (!span) continue;
+			const who = item.attendees[0];
+			blocks.push({ ...span, id: item.id, label: who?.name || $t('schedule.appointment'), kind: 'booking', status: item.status, phone: who?.phone || who?.email || undefined, item });
 		}
 		for (const item of breaks) {
 			if (item.kind === 'date' ? item.date !== day.toString() : item.day_of_week !== day.toDate('UTC').getUTCDay()) continue;
-			items.push({ id: item.id, start: minutes(item.start_time), end: minutes(item.end_time), label: item.title, kind: 'break', item });
+			blocks.push({ id: item.id, start: minutes(item.start_time), end: minutes(item.end_time), label: item.title, kind: 'break', item });
 		}
-		return items;
+		return { day, free, blocks, off: daysOff.get(day.toString()) };
 	}));
-	const allBlocks = $derived(blocks.flat());
-	const firstHour = $derived(allBlocks.length ? Math.min(...allBlocks.map((item) => Math.floor(item.start / 60))) : 8);
-	const lastHour = $derived(allBlocks.length ? Math.max(...allBlocks.map((item) => Math.ceil(item.end / 60))) : 18);
-	const hours = $derived(Array.from({ length: lastHour - firstHour }, (_, i) => firstHour + i));
+	// A week with no hours, no bookings and no deliberate day off is "not set up", which is
+	// different from "closed" and gets one explanation instead of seven "day off" labels.
+	const noHours = $derived(loaded && !loadError && !availabilityError && windows.length === 0 && bookings.length === 0
+		&& !scheduleDays.some((day) => day.is_day_off && day.override_id));
+	const availabilityHref = $derived(base + '/availability?' + new URLSearchParams({ staff_id: staffID }));
+	const rangeLabel = $derived(view === 'week'
+		? labelDate(week, { month: 'short', day: 'numeric' }) + ' – ' + labelDate(week.add({ days: 6 }), { month: 'short', day: 'numeric', year: 'numeric' })
+		: labelDate(focus, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
 
 	// First day of the week containing `day`, per the user's week-start preference.
 	function weekOf(day: CalendarDate) {
@@ -123,29 +138,55 @@
 			const wanted = user.is_admin ? params.get('staff') : null;
 			staffID = staff.find((member) => member.id === wanted)?.id
 				?? staff.find((member) => member.id === user.id)?.id ?? staff[0]?.id ?? '';
-			week = weekFromParam(params.get('week')) ?? weekOf(today(timezone));
+			const now = today(timezone);
+			const wantsDay = params.get('view') === 'day'
+				|| (!params.get('view') && window.matchMedia('(max-width: 639px)').matches);
+			if (wantsDay) {
+				view = 'day';
+				focus = dateFromParam(params.get('day')) ?? dateFromParam(params.get('week')) ?? now;
+				week = weekOf(focus);
+			} else {
+				week = weekFromParam(params.get('week')) ?? weekOf(now);
+				focus = weekOf(now).compare(week) === 0 ? now : week;
+			}
 			await load();
 		} catch (error) {
 			loadError = message(error);
 		} finally {
 			loading = false;
+			loaded = true;
 		}
 	}
 
-	function weekFromParam(value: string | null) {
+	function dateFromParam(value: string | null) {
 		if (!value) return undefined;
 		try {
-			return weekOf(parseDate(value));
+			return parseDate(value);
 		} catch {
 			return undefined;
 		}
 	}
 
+	function weekFromParam(value: string | null) {
+		const date = dateFromParam(value);
+		return date ? weekOf(date) : undefined;
+	}
+
 	// Mirror week/staff into the URL without adding history entries; defaults stay out of it.
 	function syncUrl() {
 		const url = new URL(location.href);
-		if (weekOf(today(timezone)).compare(week) === 0) url.searchParams.delete('week');
-		else url.searchParams.set('week', week.toString());
+		const now = today(timezone);
+		if (view === 'day') {
+			url.searchParams.set('view', 'day');
+			if (focus.compare(now) === 0) url.searchParams.delete('day');
+			else url.searchParams.set('day', focus.toString());
+			url.searchParams.delete('week');
+		} else {
+			url.searchParams.delete('view');
+			url.searchParams.delete('day');
+			if (weekOf(now).compare(week) === 0) url.searchParams.delete('week');
+			else url.searchParams.set('week', week.toString());
+		}
 		if (staffID && staffID !== $currentUser?.id) url.searchParams.set('staff', staffID);
 		else url.searchParams.delete('staff');
 		replaceState(url.pathname + url.search, {});
@@ -303,10 +344,68 @@
 		}
 	}
 
-	function goToWeek(day: CalendarDate) {
+	function goToWeek(day: CalendarDate, focusDay: CalendarDate = day) {
 		week = day;
+		focus = focusDay;
 		syncUrl();
 		void load();
+	}
+
+	function goToDay(day: CalendarDate) {
+		focus = day;
+		const start = weekOf(day);
+		if (start.compare(week) !== 0) {
+			week = start;
+			syncUrl();
+			void load();
+		} else {
+			syncUrl();
+		}
+	}
+
+	function setView(next: 'week' | 'day', day?: CalendarDate) {
+		if (next === 'day') {
+			const now = today(timezone);
+			focus = day ?? (weekOf(now).compare(week) === 0 ? now : week);
+		}
+		view = next;
+		syncUrl();
+	}
+
+	function step(direction: 1 | -1) {
+		if (view === 'week') goToWeek(week.add({ days: 7 * direction }));
+		else goToDay(focus.add({ days: direction }));
+	}
+
+	function goToday() {
+		const now = today(timezone);
+		if (view === 'week') goToWeek(weekOf(now), now);
+		else goToDay(now);
+	}
+
+	function jumpTo(date: CalendarDate | undefined) {
+		if (!date) return;
+		jumpOpen = false;
+		if (view === 'week') goToWeek(weekOf(date), date);
+		else goToDay(date);
+	}
+
+	// Keyboard: arrows move, T = today, N = new booking, D/W = day/week view. Ignored while typing
+	// or while any dialog/menu is open (and for physical keys, so it works on any keyboard layout).
+	function onKey(event: KeyboardEvent) {
+		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || dialogOpen || jumpOpen || !staffID) return;
+		const el = event.target as HTMLElement | null;
+		if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('[role=dialog],[role=listbox],[role=menu]'))) return;
+		switch (event.code) {
+			case 'ArrowLeft': step(-1); break;
+			case 'ArrowRight': step(1); break;
+			case 'KeyT': goToday(); break;
+			case 'KeyN': open('booking'); break;
+			case 'KeyD': setView('day'); break;
+			case 'KeyW': setView('week'); break;
+			default: return;
+		}
+		event.preventDefault();
 	}
 
 	function open(kind: Editor, date = defaultDate(), time = '09:00', item?: Booking | DoctorBreak | ScheduleDay) {
@@ -320,19 +419,21 @@
 	}
 
 	function defaultDate() {
+		if (view === 'day') return focus.toString();
 		const current = today(timezone);
 		return (weekOf(current).compare(week) === 0 ? current : week).toString();
 	}
 
-	function onBlock(day: CalendarDate, block: Block, event: MouseEvent) {
-		if (block.kind === 'free') {
-			const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-			const clicked = event.detail ? block.start + (event.clientY - rect.top) / rect.height * (block.end - block.start) : block.start;
-			const start = Math.min(block.end - 1, Math.max(block.start, Math.floor(clicked / 5) * 5));
-			open('booking', day.toString(), clock(start));
-		} else {
-			open(block.kind === 'break' ? 'removeBreak' : 'details', day.toString(), clock(block.start), block.item);
-		}
+	function onSlot(day: CalendarDate, minute: number) {
+		open('booking', day.toString(), clock(minute));
+	}
+
+	function onBlock(day: CalendarDate, block: GridBlock) {
+		open(block.kind === 'break' ? 'removeBreak' : 'details', day.toString(), clock(block.start), block.item);
+	}
+
+	function onDayOff(off: ScheduleDay) {
+		open('removeDayOff', off.date, '09:00', off);
 	}
 
 	function saved() {
@@ -345,15 +446,28 @@
 
 <svelte:head><title>{$t('schedule.title')} — Calnode</title></svelte:head>
 
+<svelte:window onkeydown={onKey} />
+
 <div class="mx-auto flex h-full min-h-0 max-w-[1800px] flex-col gap-4 px-4 py-4 sm:px-7 sm:py-6">
 	<header class="flex shrink-0 flex-wrap items-center gap-3">
 		<h1 class="mr-1 text-2xl font-semibold tracking-tight">{$t('schedule.title')}</h1>
-		<div class="flex items-center gap-1">
-			<Button variant="ghost" size="icon" aria-label={$t('schedule.previous')} onclick={() => goToWeek(week.subtract({ days: 7 }))}><ChevronLeft class="size-4" /></Button>
-			<Button variant="ghost" size="icon" aria-label={$t('schedule.next')} onclick={() => goToWeek(week.add({ days: 7 }))}><ChevronRight class="size-4" /></Button>
-			<h2 class="ml-1 text-sm font-medium whitespace-nowrap">
-				{labelDate(week, { month: 'short', day: 'numeric' })} – {labelDate(week.add({ days: 6 }), { month: 'short', day: 'numeric', year: 'numeric' })}
-			</h2>
+		<div class="flex flex-wrap items-center gap-1">
+			<Button variant="outline" size="sm" onclick={goToday} disabled={!staffID}>{$t('schedule.today')}</Button>
+			<Button variant="ghost" size="icon" aria-label={$t(view === 'week' ? 'schedule.previous' : 'schedule.previousDay')} onclick={() => step(-1)}><ChevronLeft class="size-4" /></Button>
+			<Button variant="ghost" size="icon" aria-label={$t(view === 'week' ? 'schedule.next' : 'schedule.nextDay')} onclick={() => step(1)}><ChevronRight class="size-4" /></Button>
+			<Popover.Root bind:open={jumpOpen}>
+				<Popover.Trigger disabled={!staffID} class={buttonVariants({ variant: 'ghost', size: 'sm' }) + ' text-sm font-medium whitespace-nowrap'} aria-label={$t('schedule.jumpToDate') + ' · ' + rangeLabel}>
+					{rangeLabel}
+				</Popover.Trigger>
+				<Popover.Content class="w-auto p-0" align="start">
+					<Calendar value={focus} onValueChange={(value) => jumpTo(value as CalendarDate | undefined)} locale={$localeTag} weekStartsOn={$prefs.week_start as 0 | 1 | 2 | 3 | 4 | 5 | 6} />
+				</Popover.Content>
+			</Popover.Root>
+			<div class="ml-1 flex rounded-md border p-0.5" role="group" aria-label={$t('schedule.view')}>
+				{#each ['week', 'day'] as const as option (option)}
+					<Button size="sm" variant={view === option ? 'secondary' : 'ghost'} class="h-7 px-2.5" aria-pressed={view === option} disabled={!staffID} onclick={() => setView(option)}>{$t(option === 'week' ? 'schedule.view.week' : 'schedule.view.day')}</Button>
+				{/each}
+			</div>
 		</div>
 		<div class="ml-auto flex flex-wrap items-center gap-2">
 			<div class="flex items-center gap-1 text-xs text-muted-foreground">
@@ -396,61 +510,21 @@
 				<Button variant="outline" size="sm" onclick={() => (staffID ? load() : initialize())}>{$t('doctorBreaks.retry')}</Button>
 			</div>
 		{/if}
-		{#if loading}
+		{#if noHours}
+			<div role="status" class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+				<span class="font-medium">{$t('schedule.noHours.title')}</span>
+				<span class="text-amber-800/80 dark:text-amber-200/80">{$t('schedule.noHours.body')}</span>
+				<Button variant="outline" size="sm" href={availabilityHref} class="ml-auto">{$t('schedule.noHours.cta')}</Button>
+			</div>
+		{/if}
+		{#if !loaded && loading}
 			<p class="px-4 py-3 text-sm text-muted-foreground" role="status">{$t('common.loading')}</p>
 		{:else if !staffID}
 			<p class="px-4 py-6 text-sm text-muted-foreground">{$t('schedule.noStaff')}</p>
 		{:else}
-			<div class="min-h-0 flex-1 overflow-x-auto">
-				<div bind:clientHeight={calendarHeight} class="grid h-full min-w-[760px] grid-cols-[48px_repeat(7,minmax(0,1fr))] grid-rows-[44px_minmax(0,1fr)]">
-					<div class="border-b bg-muted/20"></div>
-					{#each days as day (day.toString())}
-						{@const isToday = day.toString() === today(timezone).toString()}
-						<div class="flex items-center gap-2 border-b border-l px-3 py-2.5 {isToday ? 'bg-primary/5' : 'bg-muted/20'}">
-							<span class="grid size-7 place-items-center rounded-full text-sm font-semibold {isToday ? 'bg-primary text-primary-foreground' : ''}">{day.day}</span>
-							<span class="text-xs font-medium text-muted-foreground">{labelDate(day, { weekday: 'short' })}</span>
-						</div>
-					{/each}
-					<div class="relative min-h-0 bg-muted/20">
-						{#each hours as hour (hour)}
-							<div class="border-b px-1 text-center text-[10px] tabular-nums text-muted-foreground" style:height={100 / hours.length + '%'}>{hourLabel(hour * 60, $prefs, $localeTag)}</div>
-						{/each}
-						<span class="absolute inset-x-0 bottom-0 text-center text-[10px] tabular-nums text-muted-foreground">{hourLabel(lastHour * 60, $prefs, $localeTag)}</span>
-					</div>
-					{#each days as day, i (day.toString())}
-						{@const off = daysOff.get(day.toString())}
-						<div class="relative min-h-0 border-l {off ? 'bg-muted/60' : 'bg-muted/25'}">
-							{#each hours as hour (hour)}
-								<div class="border-b border-border/80" style:height={100 / hours.length + '%'}></div>
-							{/each}
-							{#if off}
-								{#if off.override_id}
-									<button type="button" onclick={() => open('removeDayOff', off.date, '09:00', off)}
-										class="absolute inset-x-2 top-3 rounded-lg border border-dashed bg-card/70 px-2 py-3 text-left text-xs text-muted-foreground transition-colors hover:bg-card">
-										<span class="flex items-center gap-1.5 font-medium"><CalendarOff class="size-3.5 shrink-0" />{$t('schedule.dayOff')}</span>
-										{#if off.notes}<span class="mt-1 block line-clamp-3 break-words" title={off.notes}>{off.notes}</span>{/if}
-									</button>
-								{:else}
-									<p class="absolute inset-x-2 top-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground"><CalendarOff class="size-3.5" />{$t('schedule.dayOff')}</p>
-								{/if}
-							{/if}
-							{#each blocks[i] as block (block.kind + block.id)}
-								<button type="button" onclick={(event) => onBlock(day, block, event)}
-									class="absolute inset-x-1 flex flex-col items-start justify-start overflow-hidden rounded-md border-l-2 px-1.5 py-0.5 text-left text-xs leading-tight transition hover:brightness-95 focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-primary
-										{block.kind === 'booking' && pulse.has(block.id) ? 'live-flash' : ''} {block.kind === 'free' ? 'border-emerald-500 bg-emerald-100 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-100' : block.kind === 'booking' ? 'z-10 border-blue-500 bg-blue-100 text-blue-950 dark:bg-blue-950 dark:text-blue-100' : 'z-10 border-amber-500 bg-amber-100 text-amber-950 dark:bg-amber-950 dark:text-amber-100'}"
-									style:top={(block.start / 60 - firstHour) / hours.length * 100 + '%'}
-									style:height={'calc(' + (block.end - block.start) / 60 / hours.length * 100 + '% - 1px)'}
-									title={block.label + ' · ' + label12(block.start) + '–' + label12(block.end)}
-									aria-label={block.label + ' · ' + label12(block.start) + '–' + label12(block.end)}>
-									<span class="block w-full truncate font-medium">{block.label}</span>
-									{#if (block.end - block.start) / 60 / hours.length * (calendarHeight - 44) >= 36}
-										<span class="block w-full truncate text-[11px] tabular-nums opacity-75">{label12(block.start)}–{label12(block.end)}</span>
-									{/if}
-								</button>
-							{/each}
-						</div>
-					{/each}
-				</div>
+			<!-- Stays mounted while a new week loads (dimmed), so scroll position and context survive. -->
+			<div class="flex min-h-0 flex-1 flex-col transition-opacity {loading ? 'opacity-60' : ''}" aria-busy={loading}>
+				<CalendarGrid {columns} {timezone} {pulse} {noHours} single={view === 'day'} {onSlot} {onBlock} {onDayOff} onDayClick={(day) => setView('day', day)} />
 			</div>
 		{/if}
 	</section>

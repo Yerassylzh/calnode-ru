@@ -151,3 +151,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
 	.live-flash { animation: none; outline: 2px solid var(--ring); }
 }
+
+/* Hatched background for time that is neither bookable nor booked (outside working hours). */
+.calendar-closed {
+	background-color: color-mix(in oklab, var(--muted) 55%, transparent);
+	background-image: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in oklab, var(--border) 70%, transparent) 7px 8px);
+}
