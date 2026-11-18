@@ -22,8 +22,8 @@ The most used screen. Everything else in the admin app is a supporting cast.
 | Goal | How |
 | --- | --- |
 | New booking | Click free time, or + then New booking |
-| Change time | Click the booking and type the new time (or tap a suggested free time); or drag the block to a new slot |
-| Change length | Click the booking, pick a duration |
+| Change time | Click the booking and type the new time; or drag the block to a new slot |
+| Change length | Click the booking and type the new length in minutes |
 | Cancel | Click the booking, Cancel booking, confirm |
 | Add a break or day off | + then Add break / Add day off; click the block later to delete it |
 | Move around | The arrows, or click the date to jump anywhere (today is highlighted) |
@@ -31,8 +31,8 @@ The most used screen. Everything else in the admin app is a supporting cast.
 ## Rules the screen follows
 
 - The form is short and does not scroll: name, phone, date, time, length, optional note.
-- Time is typed (`1430` becomes 14:30) with a few suggested free times beside it. A time that does
-  not fit is flagged straight away.
+- Date is picked from a calendar; time (`1430` becomes 14:30) and length in minutes are typed.
+  A time that does not fit is flagged straight away. There are no arrows or suggestion buttons.
 - There are no keyboard shortcuts on purpose.
 - If you close a form with typed-in details, it asks before throwing them away.
 - If someone else changes the booking you have open, a banner says so.
@@ -46,6 +46,7 @@ All in `frontend/src/routes/` (the home page is the calendar):
 - `schedule/calendar-grid.svelte` - the grid and dragging.
 - `schedule/schedule-form.svelte` - the pop-up form (new, change, cancel, breaks, days off).
 - `schedule/event-surface.svelte` - decides pop-up beside the click versus dialog.
-- `schedule/time-input.svelte`, `slot-suggestions.svelte`, `duration-chips.svelte`, `phone-field.svelte` - the form's fields.
+- `schedule/time-input.svelte`, `phone-field.svelte` - the form's fields.
 - Shared helpers: `frontend/src/lib/schedule/` (free-time and layout calculations).
+
 

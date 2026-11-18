@@ -389,3 +389,9 @@ Feedback on the shipped UI: too many buttons, long modals, no plain typed date/t
 - **Scrollbars** are slim and invisible until hover, app-wide.
 - **24-hour time is the default** everywhere: frontend defaults, and migration `00076_default_24h_time.sql` which moves existing users to 24 h once (they can switch back in their profile) and makes new users start on 24 h through a trigger. One handler test and one visual test were updated to the new defaults.
 - Verified in the in-app browser against the mock API (header is one 36 px row with exactly those controls; the + menu lists the three actions; the form is 532 x 571 px with no scrolling; typing `1430` gives 14:30 and shows the nearby free times; `2330` is flagged as not fitting) and with Go tests in the container (`internal/db`, `internal/booking`, `internal/handler` pass). `pnpm check` 0 errors, `pnpm test:visual` 51/51.
+
+
+## 19. Typed-only form (2026-11-19)
+
+Follow-up to section 18: the booking form no longer has the date arrows, the suggested free-time buttons or the duration buttons. Date is chosen from the calendar popup; start time and duration (minutes) are typed, with the end time and a not-fitting warning shown live. Deleted slot-suggestions.svelte and duration-chips.svelte. Checked in the browser: no arrows or buttons, duration 40 gives 'Ends at 10:40', typing 1100 gives 11:00, popover height 440 px. check 0 errors, visual tests 51/51.
+

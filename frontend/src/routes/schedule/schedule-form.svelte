@@ -3,8 +3,8 @@
 </script>
 
 <script lang="ts">
-	import { parseAbsolute, parseDate, parseDateTime, today, toZoned } from '@internationalized/date';
-	import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Mail, MapPin, Phone, UserRound } from '@lucide/svelte';
+	import { parseAbsolute, parseDate, parseDateTime, toZoned } from '@internationalized/date';
+	import { CalendarDays, Clock3, Mail, MapPin, Phone, UserRound } from '@lucide/svelte';
 	import { api, type Booking, type DoctorBreak, type ScheduleDay } from '$lib/api';
 	import { localeTag, t } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
@@ -15,8 +15,6 @@
 	import { createStartChecker } from '$lib/schedule/slots';
 	import { isValidPhone, normalizePhone } from '$lib/phone';
 	import TimeInput from './time-input.svelte';
-	import SlotSuggestions from './slot-suggestions.svelte';
-	import DurationChips from './duration-chips.svelte';
 	import PhoneField from './phone-field.svelte';
 
 	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, remoteNotice = '', dirty = $bindable(false), onLoadLatest, onCancelBooking, onMutating, onSaved, onDismiss }: {
@@ -72,8 +70,6 @@
 		: duration);
 	const checker = $derived(createStartChecker({ windows: freeWindows, date, timezone, durationMinutes: appointmentMinutes ?? 0 }));
 	const slotsReady = $derived(needsAvailability && !availabilityLoading && !availabilityError && !!date && !!appointmentMinutes);
-	// undefined while loading (the picker shows its own status); chips step by 10 minutes, plus each window's own start.
-	const startList = $derived(slotsReady ? checker.starts(10) : needsAvailability && !availabilityLoading ? [] : undefined);
 	const timeAvailable = $derived(!needsAvailability || (slotsReady && clockRe.test(start) && checker.fits(toMinutes(start))));
 	const endsAt = $derived(clockRe.test(start) && duration && duration > 0 ? toClock(Math.min(1439, toMinutes(start) + duration)) : '');
 
@@ -138,14 +134,6 @@
 	$effect(() => {
 		if (kind === 'details' && editing && endsAt) end = endsAt;
 	});
-
-	function shiftDate(days: number) {
-		if (date) date = parseDate(date).add({ days }).toString();
-	}
-
-	function setDate(offset: number) {
-		date = today(timezone).add({ days: offset }).toString();
-	}
 
 	function formatDate(iso: string) {
 		return new Date(iso).toLocaleDateString($localeTag, { timeZone: timezone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -318,26 +306,23 @@
 		{/if}
 
 		{#if kind === 'booking' || (kind === 'details' && editing)}
-			<div class="grid grid-cols-2 gap-x-3 gap-y-3">
+			<div class="grid grid-cols-2 gap-x-3 gap-y-4">
 				<div class="space-y-1.5">
 					<Label for="schedule-date">{$t('schedule.date')}</Label>
-					<div class="flex items-center gap-1">
-						<Button type="button" variant="outline" size="icon" class="size-10 shrink-0" aria-label={$t('schedule.previousDay')} onclick={() => shiftDate(-1)}><ChevronLeft class="size-4" /></Button>
-						<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone} class="h-10 min-w-0 flex-1 px-2 text-sm" />
-						<Button type="button" variant="outline" size="icon" class="size-10 shrink-0" aria-label={$t('schedule.nextDay')} onclick={() => shiftDate(1)}><ChevronRight class="size-4" /></Button>
-					</div>
+					<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone} class="h-10 w-full px-3 text-sm" />
 				</div>
 				<div class="space-y-1.5">
 					<Label for="schedule-start">{$t('schedule.start')}</Label>
 					<TimeInput id="schedule-start" label={$t('schedule.start')} bind:value={start} invalid={slotsReady && clockRe.test(start) && !timeAvailable} />
 				</div>
-				<div class="col-span-2">
-					<SlotSuggestions bind:value={start} starts={startList} />
-				</div>
-				<div class="col-span-2 space-y-1.5">
+				<div class="space-y-1.5">
 					<Label for="schedule-duration">{$t('schedule.duration')}</Label>
-					<DurationChips id="schedule-duration" bind:value={duration} {endsAt} />
+					<div class="relative">
+						<Input id="schedule-duration" class="h-10 pr-12 tabular-nums" type="number" min="1" max="1440" inputmode="numeric" bind:value={duration} required />
+						<span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{$t('schedule.minuteUnit')}</span>
+					</div>
 				</div>
+				<p class="self-end pb-2.5 text-sm tabular-nums text-muted-foreground">{#if endsAt}{$t('schedule.endsAt', { time: endsAt })}{/if}</p>
 			</div>
 		{:else if kind === 'break'}
 			<div class="grid grid-cols-2 gap-x-3 gap-y-3">
