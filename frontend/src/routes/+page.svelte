@@ -394,8 +394,8 @@
 	// or while any dialog/menu is open (and for physical keys, so it works on any keyboard layout).
 	function onKey(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || dialogOpen || jumpOpen || !staffID) return;
-		const el = event.target as HTMLElement | null;
-		if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('[role=dialog],[role=listbox],[role=menu]'))) return;
+		const el = event.target;
+		if (el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('[role=dialog],[role=listbox],[role=menu]'))) return;
 		switch (event.code) {
 			case 'ArrowLeft': step(-1); break;
 			case 'ArrowRight': step(1); break;
