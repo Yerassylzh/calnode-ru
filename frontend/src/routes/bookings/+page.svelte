@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { createPoller } from '$lib/live/poller';
+	import { connectLiveEvents } from '$lib/live/events';
 	import { api, type Booking } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { prefs, fmtDateTime } from '$lib/prefs';
@@ -193,7 +194,14 @@
 		load();
 		loadFilterOptions();
 		poller.start();
-		return () => poller.stop();
+		const stopEvents = connectLiveEvents({
+			onChange: () => poller.trigger(),
+			onState: (connected) => poller.setInterval(connected ? 60_000 : 15_000)
+		});
+		return () => {
+			stopEvents();
+			poller.stop();
+		};
 	});
 
 	let confirmOpen = $state(false);

@@ -16,11 +16,13 @@ import (
 
 	"github.com/calnode/calnode/internal/db"
 	"github.com/calnode/calnode/internal/uid"
+	"sync/atomic"
 )
 
 // Service handles booking creation and lifecycle.
 type Service struct {
-	db *sql.DB
+	db       *sql.DB
+	onChange atomic.Pointer[changeHook]
 }
 
 // New returns a Service backed by db.
@@ -242,7 +244,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 	}
 
 	nowT, _ := time.Parse(time.RFC3339Nano, now)
-	return &Booking{
+	created := &Booking{
 		ManageToken:    manageToken,
 		Notes:          p.Notes,
 		ContactMethod:  p.Organizer.ContactMethod,
@@ -257,7 +259,9 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Booking, error) 
 		InviteDelivery: inviteDelivery,
 		CreatedAt:      nowT,
 		UpdatedAt:      nowT,
-	}, nil
+	}
+	s.notify(chosenHost)
+	return created, nil
 }
 
 // clearNeedsSync drops reschedule-drift flags when a booking is cancelled: the
@@ -298,6 +302,7 @@ func (s *Service) Cancel(ctx context.Context, hostID, id, reason string) error {
 		return ErrAlreadyCancelled
 	}
 	s.clearNeedsSync(ctx, id)
+	s.notify(hostID)
 	return nil
 }
 
@@ -326,6 +331,7 @@ func (s *Service) CancelByID(ctx context.Context, id, reason string) error {
 		return ErrAlreadyCancelled
 	}
 	s.clearNeedsSync(ctx, id)
+	s.notify("")
 	return nil
 }
 
@@ -460,7 +466,11 @@ func (s *Service) UpdateNotes(ctx context.Context, id, notes string) (*Booking, 
 			return nil, ErrAlreadyCancelled
 		}
 	}
-	return s.Get(ctx, id)
+	updated, err := s.Get(ctx, id)
+	if err == nil {
+		s.notify(updated.HostID)
+	}
+	return updated, err
 }
 
 func (s *Service) Get(ctx context.Context, id string) (*Booking, error) {
@@ -684,6 +694,7 @@ func (s *Service) Reschedule(ctx context.Context, bookingID string, newStart, ne
 	if t, err := time.Parse(time.RFC3339Nano, now); err == nil {
 		b.UpdatedAt = t
 	}
+	s.notify(b.HostID)
 	return b, nil
 }
 
@@ -740,6 +751,7 @@ func (s *Service) ReassignHost(ctx context.Context, bookingID, newHostID string)
 	if t, err := time.Parse(time.RFC3339Nano, now); err == nil {
 		b.UpdatedAt = t
 	}
+	s.notify("") // old and new host both need a refresh
 	return b, nil
 }
 
@@ -771,6 +783,7 @@ func (s *Service) CancelByToken(ctx context.Context, rawToken, reason string) (*
 		b.UpdatedAt = t
 	}
 	s.clearNeedsSync(ctx, b.ID)
+	s.notify(b.HostID)
 	return b, nil
 }
 

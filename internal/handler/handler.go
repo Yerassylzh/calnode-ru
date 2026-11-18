@@ -32,6 +32,7 @@ type Handler struct {
 	calMu             sync.RWMutex
 	cal               *calendar.Service
 	calNudge          chan struct{} // buffered(1): wakes the calendar reconciler after a failed inline op
+	events            *eventHub     // admin live-update streams (GET /v1/events)
 	webhookSvc        *webhook.Service
 	baseURL           string
 	publicBaseURL     string
@@ -125,14 +126,19 @@ func (h *Handler) getLLM() *llm.Client {
 
 func New(db *sql.DB, logger *slog.Logger) *Handler {
 	whs, _ := webhook.New(db, "") // ephemeral key when no encryption key configured
-	return &Handler{
+	h := &Handler{
 		db:         db,
 		logger:     logger,
 		bookingSvc: booking.New(db),
 		mailer:     &mailer.Noop{},
 		webhookSvc: whs,
 		calNudge:   make(chan struct{}, 1),
+		events:     newEventHub(),
 	}
+	// Every booking mutation, from any path (REST, MCP, assistant, admin UI, manage link),
+	// rings the live-update doorbell once it is committed.
+	h.bookingSvc.SetOnChange(func(c booking.Change) { h.events.publish(c.HostID) })
+	return h
 }
 
 // SetMailer configures the email sender and the base URL used in email links.

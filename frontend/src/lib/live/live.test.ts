@@ -89,3 +89,80 @@ describe('createPoller', () => {
 		p.stop();
 	});
 });
+
+describe('poller.setInterval', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	test('a new base interval applies from the next scheduled run', async () => {
+		const run = vi.fn().mockResolvedValue(undefined);
+		const p = createPoller({ run, interval: 1000 });
+		p.start();
+		await vi.advanceTimersByTimeAsync(1100); // first run, schedules the next in 1000
+		p.setInterval(5000);
+		await vi.advanceTimersByTimeAsync(1000); // the already-scheduled run still fires
+		expect(run).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(4000);
+		expect(run).toHaveBeenCalledTimes(2); // the next one is now 5000 away
+		await vi.advanceTimersByTimeAsync(1100);
+		expect(run).toHaveBeenCalledTimes(3);
+		p.stop();
+	});
+});
+
+describe('connectLiveEvents', () => {
+	type Listener = () => void;
+	class FakeSource {
+		static last: FakeSource;
+		listeners: Record<string, Listener[]> = {};
+		closed = false;
+		constructor(public url: string) {
+			FakeSource.last = this;
+		}
+		addEventListener(name: string, fn: Listener) {
+			(this.listeners[name] ??= []).push(fn);
+		}
+		emit(name: string) {
+			(this.listeners[name] ?? []).forEach((fn) => fn());
+		}
+		close() {
+			this.closed = true;
+		}
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.stubGlobal('EventSource', FakeSource);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	test('coalesces bursts into one change, reports state, and closes', async () => {
+		const { connectLiveEvents } = await import('./events');
+		const onChange = vi.fn();
+		const onState = vi.fn();
+		const stop = connectLiveEvents({ onChange, onState, debounceMs: 100 });
+		expect(FakeSource.last.url).toBe('/v1/events');
+
+		FakeSource.last.emit('open');
+		expect(onState).toHaveBeenLastCalledWith(true);
+
+		FakeSource.last.emit('bookings');
+		FakeSource.last.emit('bookings');
+		FakeSource.last.emit('bookings');
+		await vi.advanceTimersByTimeAsync(150);
+		expect(onChange).toHaveBeenCalledTimes(1);
+
+		FakeSource.last.emit('error');
+		expect(onState).toHaveBeenLastCalledWith(false);
+
+		stop();
+		expect(FakeSource.last.closed).toBe(true);
+	});
+});

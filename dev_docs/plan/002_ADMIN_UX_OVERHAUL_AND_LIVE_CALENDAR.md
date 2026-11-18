@@ -1,6 +1,6 @@
 ﻿# 002 — Admin UX overhaul: leaner navigation, enterprise-grade calendar interactions, live bookings
 
-Status: Phases 0-6 implemented in part (2026-11-18, see sections 10-15); Phase 7 not started.
+Status: Phases 0-7 implemented (Phase 6 in part) (2026-11-18, see sections 10-16).
 Prepared: 2026-11-18.
 
 ## 1. Objective and ground rules
@@ -356,3 +356,17 @@ Shipped (frontend only): a keyboard-shortcuts dialog (`?` or the keyboard button
 Verification: `pnpm check` 0 errors, `pnpm test:visual` 49/49, build OK. In the browser against the mock API: the rail collapsed to 56 px, persisted across a reload, and the toggle state flipped back; `?` opened the dialog with all seven shortcuts. Width/fade animations did not finish in the throttled pane, so final widths after toggling back were not observed.
 
 **Not done:** an automated accessibility audit (injecting axe-core from a CDN was blocked, so none was run; run it locally before release), drag-to-move/resize, the user dropdown menu (needs the shadcn `dropdown-menu`), the mobile sheet menu, merging Settings into one page, compacting the calendar header on phones (still wraps to about 330 px), and a full Russian copy review of the older catalogs.
+
+## 16. Phase 7 implementation record (2026-11-18) - push channel (backend change, approved)
+
+This is the one backend change in the plan, requested explicitly. It adds an endpoint and a notification hook; no booking logic, validation, schema or existing response changed.
+
+- **`internal/booking/change.go` + hooks in `service.go`:** `Service.SetOnChange(func(Change))`, called after commit by `Create`, `Cancel`, `CancelByID`, `CancelByToken`, `UpdateNotes`, `Reschedule` and `ReassignHost` (so REST, MCP, the assistant, the admin UI and manage links all notify). `Change` carries only a host id (empty = unknown/several), never booking data. Failed mutations do not notify.
+- **`internal/handler/events.go`:** `GET /v1/events` (`RequireAuth`, so cookie or API key), a Server-Sent Events stream. Admins are notified for every host, members only for their own; an unknown host reaches everyone. Notifications coalesce into one `event: bookings` frame; a `: ping` heartbeat every 25 s; each stream ends after 10 min (the browser reconnects itself) and all streams end when the worker context is cancelled so graceful shutdown is not held up. The server's 30 s `WriteTimeout` is lifted per stream via `http.ResponseController`; `responseWriter` in `internal/server/middleware.go` gained `Unwrap()` so that works through the logging wrapper. Because the payload is only "refetch", the endpoint cannot disclose anything the list endpoints would not.
+- **Frontend:** `lib/live/events.ts` (`connectLiveEvents`, debounced, reports connected/disconnected) and `poller.setInterval`. Calendar and Bookings refetch the moment an event arrives; while the stream is connected polling slows from 15 s to 60 s as a safety net, and it returns to 15 s if the stream drops or is unavailable (old server, proxy, 401). The tab's own edits echo back over the stream, so the calendar suppresses "remote change" toasts for 4 s after it starts a mutation.
+
+Verification: Go tests run in the `golang:1.27.2-alpine` image already on this machine (modules fetched per `go.sum`): new `TestEventHub*`, `TestStreamEvents*` (auth, delivery, shutdown close) and `TestOnChange*` (every mutation notifies the right host, failures do not, hook removable) pass; `go build ./...` and `go vet` are clean; `internal/booking` and `internal/handler` suites pass. Frontend: `pnpm check` 0 errors, `pnpm test:visual` 51/51 (poller interval and event-source tests added). **End to end against the real binary** (`go run` in a container, owner claimed, session cookie): `GET /v1/events` without a session returned 401; with a session a created booking, a notes edit and a cancel each produced one `bookings` event within the same second; a separate stream stayed open for 40 s with a `: ping` at 25 s, i.e. past the 30 s write timeout.
+
+Not verified: the browser UI against the real server (the email login is disabled on a fresh instance and the session cookie is HttpOnly, so the pane could not be signed in), multi-instance deployments (the hub is in-process; fine for the single-binary SQLite design in CLAUDE.md), and behaviour behind a buffering reverse proxy (the response sets `X-Accel-Buffering: no`).
+
+Pre-existing, unrelated, left alone: `internal/server` `TestRateLimit_returns429AfterLimit` and `TestRateLimit_retryAfterHeader` fail because request rate limiting was removed in commit `f254f42` without updating those tests, and `gofmt` flags `internal/handler/reschedule_handler.go`.

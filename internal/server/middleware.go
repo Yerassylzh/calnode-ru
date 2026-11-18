@@ -113,6 +113,10 @@ func (rw *responseWriter) Flush() {
 	}
 }
 
+// Unwrap lets http.ResponseController reach the real connection, so a long-lived stream can
+// lift the server's per-response write deadline.
+func (rw *responseWriter) Unwrap() http.ResponseWriter { return rw.ResponseWriter }
+
 // SameOriginCheck is CSRF defense-in-depth layered on the session cookie's
 // SameSite=Lax: for a state-changing request that carries the admin session cookie,
 // it rejects the request when a present Origin (or, as a fallback, Referer) header

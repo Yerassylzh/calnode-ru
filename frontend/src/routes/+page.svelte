@@ -12,6 +12,7 @@
 	import { startOfWeek, clockLabel } from '$lib/datetime';
 	import type { Span } from '$lib/schedule/layout';
 	import { createPoller } from '$lib/live/poller';
+	import { connectLiveEvents } from '$lib/live/events';
 	import { diffBookings, isEmptyDiff } from '$lib/live/diff';
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
@@ -75,6 +76,9 @@
 	let remoteNotice = $state<'' | 'changed' | 'cancelled' | 'removed'>('');
 	let remoteFresh = $state<Booking | undefined>();
 	let pollTick = 0;
+	// Changes this tab just made echo back over the push stream; do not announce them as remote.
+	let quietUntil = 0;
+	const markOwnEdit = () => (quietUntil = Date.now() + 4000);
 
 	const columns = $derived<GridColumn[]>(days.map((day) => {
 		const free: Span[] = [];
@@ -211,7 +215,15 @@
 
 	onMount(() => {
 		void initialize().then(() => poller.start());
-		return () => poller.stop();
+		// Push: refetch the moment anything changes; polling slows to a safety net while connected.
+		const stopEvents = connectLiveEvents({
+			onChange: () => poller.trigger(),
+			onState: (connected) => poller.setInterval(connected ? 60_000 : 15_000)
+		});
+		return () => {
+			stopEvents();
+			poller.stop();
+		};
 	});
 
 	// Background refresh: bookings + availability every tick (free time depends on bookings);
@@ -273,7 +285,7 @@
 				lastUpdated = new Date();
 				const nextWindows = free.value.windows;
 				const nextDays = free.value.days ?? [];
-				if (notify) announce(bookings, bookingItems.value);
+				if (notify && Date.now() >= quietUntil) announce(bookings, bookingItems.value);
 				if (!sameJSON(bookings, bookingItems.value)) bookings = bookingItems.value;
 				if (!sameJSON(windows, nextWindows)) windows = nextWindows;
 				if (!sameJSON(scheduleDays, nextDays)) scheduleDays = nextDays;
@@ -496,6 +508,7 @@
 	async function cancelBooking() {
 		const booking = target && 'start_at' in target ? target : undefined;
 		if (!booking) return;
+		markOwnEdit();
 		try {
 			await api.post('/v1/bookings/' + encodeURIComponent(booking.id) + '/cancel', {});
 			dialogOpen = false;
@@ -510,6 +523,7 @@
 	async function confirmRemoval() {
 		const current = removal;
 		if (!current) return;
+		markOwnEdit();
 		try {
 			if (current.kind === 'break') {
 				await api.del('/v1/doctor-breaks/' + encodeURIComponent(current.item.id));
@@ -631,7 +645,7 @@
 
 <EventSurface open={dialogOpen} {anchor} title={surfaceTitle} description={staff.find((member) => member.id === staffID)?.name || timezone} onRequestClose={requestClose} locked={discardOpen || cancelOpen || removalOpen}>
 	{#if dialogOpen}
-		<ScheduleForm kind={editor} {staffID} {timezone} {initialDate} {initialTime} {target} staffName={staff.find((member) => member.id === staffID)?.name || ''} remoteNotice={remoteNotice} bind:dirty={formDirty} onLoadLatest={loadLatest} onCancelBooking={() => (cancelOpen = true)} onSaved={saved} onDismiss={requestClose} />
+		<ScheduleForm kind={editor} {staffID} {timezone} {initialDate} {initialTime} {target} staffName={staff.find((member) => member.id === staffID)?.name || ''} remoteNotice={remoteNotice} bind:dirty={formDirty} onLoadLatest={loadLatest} onCancelBooking={() => (cancelOpen = true)} onMutating={markOwnEdit} onSaved={saved} onDismiss={requestClose} />
 	{/if}
 </EventSurface>
 

@@ -38,6 +38,11 @@ import (
 // has finished its current poll cycle.
 func BuildHandler(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) (*handler.Handler, func()) {
 	h := handler.New(db, logger)
+	// Open live-update streams must not hold up graceful shutdown: end them when the worker context is cancelled.
+	go func() {
+		<-ctx.Done()
+		h.CloseEvents()
+	}()
 	h.SetBaseURL(cfg.BaseURL)
 	h.SetPublicBaseURL(cfg.PublicBaseURL)
 	// DATA_DIR, defaulting to the relative "data" every deployment has always used.
@@ -352,6 +357,7 @@ func New(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logge
 	mux.HandleFunc("PATCH /v1/teams/{id}/members/{userId}", h.RequireAuth(h.UpdateTeamMember))
 	mux.HandleFunc("DELETE /v1/teams/{id}/members/{userId}", h.RequireAuth(h.RemoveTeamMember))
 	mux.HandleFunc("GET /v1/users/me", h.RequireAuth(h.GetMe))
+	mux.HandleFunc("GET /v1/events", h.RequireAuth(h.StreamEvents))
 	mux.HandleFunc("PATCH /v1/users/me", h.RequireAuth(h.PatchMe))
 	avatarRL := RateLimit(20, time.Minute)
 	mux.HandleFunc("POST /v1/users/me/avatar", avatarRL(h.RequireAuth(h.UploadAvatar)))

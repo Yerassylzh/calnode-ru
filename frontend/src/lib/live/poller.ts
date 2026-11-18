@@ -18,7 +18,8 @@ export function delayFor(failures: number, interval: number, maxDelay: number): 
 	return Math.min(maxDelay, interval * 2 ** Math.max(0, failures));
 }
 
-export function createPoller({ run, interval = 15_000, maxDelay = 120_000 }: PollerOptions) {
+export function createPoller({ run, interval: initialInterval = 15_000, maxDelay = 120_000 }: PollerOptions) {
+	let interval = initialInterval;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let running = false;
 	let active = false;
@@ -76,10 +77,16 @@ export function createPoller({ run, interval = 15_000, maxDelay = 120_000 }: Pol
 		window.removeEventListener('online', onResume);
 	}
 
+	/** Change the base delay (e.g. slow down while a push stream is connected). Applies from the next run. */
+	function setInterval(ms: number) {
+		interval = ms;
+	}
+
 	return {
 		start,
 		stop,
 		trigger,
+		setInterval,
 		get failures() {
 			return failures;
 		}

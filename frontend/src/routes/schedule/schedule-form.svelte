@@ -20,7 +20,7 @@
 	import DurationChips from './duration-chips.svelte';
 	import PhoneField from './phone-field.svelte';
 
-	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, remoteNotice = '', dirty = $bindable(false), onLoadLatest, onCancelBooking, onSaved, onDismiss }: {
+	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, remoteNotice = '', dirty = $bindable(false), onLoadLatest, onCancelBooking, onMutating, onSaved, onDismiss }: {
 		kind: 'booking' | 'break' | 'details' | 'dayOff';
 		staffID: string;
 		staffName: string;
@@ -34,6 +34,8 @@
 		/** True while there are edits that closing would lose. */
 		dirty?: boolean;
 		onCancelBooking?: () => void;
+		/** Called just before this form sends a change, so the page can ignore the echo of its own edit. */
+		onMutating?: () => void;
 		onSaved: (result: SavedResult) => void;
 		onDismiss: () => void;
 	} = $props();
@@ -204,6 +206,7 @@
 		}
 		saving = true;
 		error = '';
+		onMutating?.();
 		let result: SavedResult;
 		try {
 			if (kind === 'dayOff') {
