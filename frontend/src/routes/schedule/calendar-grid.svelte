@@ -23,6 +23,7 @@
 	import { clockLabel, hourLabel } from '$lib/datetime';
 	import { prefs } from '$lib/prefs';
 	import { t, localeTag } from '$lib/i18n';
+	import { anchorFromRect, type Anchor } from './event-surface.svelte';
 	import { complementSpans, initialScrollMinute, packColumns, snapInSpan } from '$lib/schedule/layout';
 
 	let {
@@ -45,8 +46,8 @@
 		hourPx?: number;
 		/** One day wide (day view): headers are not links and the grid has no minimum width. */
 		single?: boolean;
-		onSlot: (day: CalendarDate, minute: number) => void;
-		onBlock: (day: CalendarDate, block: GridBlock) => void;
+		onSlot: (day: CalendarDate, minute: number, anchor: Anchor) => void;
+		onBlock: (day: CalendarDate, block: GridBlock, anchor: Anchor) => void;
 		onDayOff: (off: ScheduleDay) => void;
 		onDayClick: (day: CalendarDate) => void;
 	} = $props();
@@ -99,7 +100,10 @@
 	function pick(event: MouseEvent, day: CalendarDate, span: Span) {
 		ghost = null;
 		// detail 0 = keyboard activation: there is no pointer position, so use the span start.
-		onSlot(day, event.detail ? minuteAt(event, event.currentTarget as HTMLElement, span) : span.start);
+		const element = event.currentTarget as HTMLElement;
+		const start = event.detail ? minuteAt(event, element, span) : span.start;
+		const rect = element.getBoundingClientRect();
+		onSlot(day, start, anchorFromRect(new DOMRect(rect.left, rect.top + px(start - span.start), rect.width, px(30))));
 	}
 
 	function tone(block: GridBlock) {
@@ -175,7 +179,7 @@
 				{#each column.placed as placed (placed.item.kind + placed.item.id)}
 					{@const block = placed.item}
 					{@const height = Math.max(px(block.end - block.start) - 2, 18)}
-					<button type="button" onclick={() => onBlock(column.day, block)}
+					<button type="button" onclick={(event) => onBlock(column.day, block, anchorFromRect((event.currentTarget as HTMLElement).getBoundingClientRect()))}
 						class="absolute z-10 flex flex-col items-start overflow-hidden rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-xs leading-tight shadow-sm ring-1 ring-inset ring-black/5 transition hover:brightness-95 focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-primary {tone(block)} {block.kind === 'booking' && pulse.has(block.id) ? 'live-flash' : ''}"
 						style:top={px(block.start) + 1 + 'px'} style:height={height + 'px'}
 						style:left={`calc(${(placed.col / placed.cols) * 100}% + 2px)`} style:width={`calc(${100 / placed.cols}% - 4px)`}

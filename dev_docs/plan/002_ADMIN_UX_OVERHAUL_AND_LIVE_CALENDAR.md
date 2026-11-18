@@ -1,6 +1,6 @@
 ﻿# 002 — Admin UX overhaul: leaner navigation, enterprise-grade calendar interactions, live bookings
 
-Status: Phases 0-2 implemented (2026-11-18, see sections 10-11); Phases 3-7 not started.
+Status: Phases 0-4 implemented (2026-11-18, see sections 10-13); Phases 5-7 not started.
 Prepared: 2026-11-18.
 
 ## 1. Objective and ground rules
@@ -320,3 +320,17 @@ Shipped (frontend only): new `routes/schedule/calendar-grid.svelte` with fixed 6
 
 Verification: `pnpm check` 0 errors, `pnpm test:visual` 38/38, build OK. In the browser against the mock API I saw the grid render with hatching, hour/half-hour rules, today highlight, overlapping bookings side by side and a 10-minute booking. **Verified afterwards in the browser against the mock API:** hover ghost and click (13:10 slot gave a 13:10 start), now-line, Day/Week switching, arrows/T/N/D/W shortcuts with URL updates, jump-to-date popover, the no-hours banner, and a 375 px mobile layout (opens in Day view). Bug found and fixed: the key handler called `closest` on a non-element target. Known rough edge: on phones the header wraps to about 330 px tall; it is a candidate for the Phase 4/6 header cleanup.
 
+
+## 13. Phase 4 implementation record (2026-11-18) - popovers instead of the modal
+
+Shipped (frontend only):
+- `routes/schedule/event-surface.svelte`: an anchored `Popover` (virtual anchor = the clicked block, or a rect snapshot at the clicked slot, opens to the side with collision flipping) on desktop; on phones or when there is no anchor (header button, `N` key) the same content renders as a bottom-sheet-style `Dialog`. Every dismiss path (Escape, outside click, X, Close button) goes through one `requestClose`.
+- **Unsaved-changes guard**: the form reports `dirty` (new booking with a name/contact/notes, edited time or notes, break title, day-off reason); dismissing then shows a "Discard changes?" `ConfirmDialog` with Keep editing / Discard.
+- **Cancel booking** now uses a destructive `ConfirmDialog` instead of the in-form two-step; **removing a break or a day off** is a one-click `ConfirmDialog` on the block (no form shell). The `removeBreak`/`removeDayOff` form modes were deleted.
+- **Specific toasts** with names and times: created / moved / updated / cancelled / break added+removed / day off added+removed.
+- Form re-laid out for 420 px (date full width, time and duration side by side), sticky footer, and the contact method now defaults to **Phone** (matches plan 001; the phone field component itself is Phase 5).
+- Fixed along the way: an anchored popover opened from a click was dismissed by that same click (ignored for 300 ms after opening), and clicks inside a confirmation were treated as outside the popover (surface is `locked` while a confirmation is open).
+
+Verification: `pnpm check` 0 errors, `pnpm test:visual` 38/38, build OK. Against the mock API in the in-app browser: clicking a booking opened a popover beside it with no overlay; a real click on a free slot opened the quick-create popover at the right time with Phone preselected; clean Escape closed it; with a typed name Escape showed the discard confirm, Keep editing preserved the input, Discard closed it; Cancel booking showed its confirm and then the toast "Booking cancelled: ... 10:00". Caveats: the pane was throttled in places (exit animations did not complete, and real keyboard Escape/clicks were unreliable), so several steps were driven with dispatched events; the break/day-off removal confirms and the phone bottom-sheet layout were not exercised by hand.
+
+Not done from section 4.2: separate `BookingCard` read-only-first view and a reduced "quick create" with a "More options" expander (the existing form is used in both roles), drag-to-create, and an undo window after cancelling (the API gives none).

@@ -1,3 +1,7 @@
+<script lang="ts" module>
+	export type SavedResult = { kind: 'created' | 'updated' | 'rescheduled' | 'breakAdded' | 'dayOffAdded'; name?: string; startAt?: string };
+</script>
+
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { parseAbsolute, parseDate, parseDateTime, toZoned } from '@internationalized/date';
@@ -12,8 +16,8 @@
 	import * as Select from '$lib/components/ui/select';
 	import TimePicker from './time-picker.svelte';
 
-	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, remoteNotice = '', onLoadLatest, onSaved, onDismiss }: {
-		kind: 'booking' | 'break' | 'details' | 'removeBreak' | 'dayOff' | 'removeDayOff';
+	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, remoteNotice = '', dirty = $bindable(false), onLoadLatest, onCancelBooking, onSaved, onDismiss }: {
+		kind: 'booking' | 'break' | 'details' | 'dayOff';
 		staffID: string;
 		staffName: string;
 		timezone: string;
@@ -23,13 +27,14 @@
 		/** Set by the calendar when the open booking changed elsewhere while this form was open. */
 		remoteNotice?: '' | 'changed' | 'cancelled' | 'removed';
 		onLoadLatest?: () => void;
-		onSaved: () => void;
+		/** True while there are edits that closing would lose. */
+		dirty?: boolean;
+		onCancelBooking?: () => void;
+		onSaved: (result: SavedResult) => void;
 		onDismiss: () => void;
 	} = $props();
 
 	const appointment = $derived(target && 'start_at' in target ? target : undefined);
-	const breakItem = $derived(target && 'start_time' in target ? target : undefined);
-	const dayOff = $derived(target && 'is_day_off' in target ? target : undefined);
 	const attendee = $derived(appointment?.attendees[0]);
 	let date = $state('');
 	let start = $state('');
@@ -38,9 +43,8 @@
 	let duration = $state<number | undefined>(20);
 	let name = $state('');
 	let notes = $state('');
-	let contactMethod = $state<'phone' | 'email'>('email');
+	let contactMethod = $state<'phone' | 'email'>('phone');
 	let contact = $state('');
-	let confirmingCancel = $state(false);
 	let saving = $state(false);
 	let error = $state('');
 	let lastPayload = '';
@@ -176,22 +180,17 @@
 	const notesDirty = $derived(kind === 'details' && !!appointment && notes.trim() !== (appointment.notes ?? '').trim());
 	const timeBlocked = $derived(kind === 'details' ? timeDirty && (!endValid || !timeAvailable) : needsAvailability && !timeAvailable);
 
+	// Anything typed or changed that closing the surface would throw away.
+	const formDirty = $derived(
+		kind === 'booking' ? !!(name.trim() || contact.trim() || notes.trim())
+		: kind === 'details' ? editing && (timeDirty || notesDirty)
+		: kind === 'break' ? !!title.trim()
+		: kind === 'dayOff' ? !!notes.trim() : false
+	);
+	$effect(() => { dirty = formDirty; });
+
 	function endAt() {
 		return toZoned(parseDateTime(date + 'T' + end), timezone, 'reject').toDate().toISOString();
-	}
-
-	async function cancelAppointment() {
-		if (!appointment || saving) return;
-		saving = true;
-		error = '';
-		try {
-			await api.post('/v1/bookings/' + encodeURIComponent(appointment.id) + '/cancel', {});
-			onSaved();
-		} catch (failure) {
-			error = failure instanceof Error ? failure.message : $t('common.error');
-		} finally {
-			saving = false;
-		}
 	}
 
 	async function save(event: SubmitEvent) {
@@ -207,22 +206,22 @@
 		}
 		saving = true;
 		error = '';
+		let result: SavedResult;
 		try {
 			if (kind === 'dayOff') {
 				await api.post('/v1/availability-overrides', { user_id: staffID, date, reason: 'day_off', notes: notes.trim() || undefined });
-			} else if (kind === 'removeDayOff' && dayOff?.override_id) {
-				await api.del('/v1/availability-overrides/' + encodeURIComponent(dayOff.override_id));
+				result = { kind: 'dayOffAdded' };
 			} else if (kind === 'break') {
 				await api.post('/v1/doctor-breaks', {
 					user_id: staffID, kind: 'date', date, start_time: start, end_time: end,
 					title: title.trim() || $t('doctorBreaks.defaultTitle')
 				});
-			} else if (kind === 'removeBreak' && breakItem) {
-				await api.del('/v1/doctor-breaks/' + encodeURIComponent(breakItem.id));
+				result = { kind: 'breakAdded' };
 			} else if (kind === 'details' && appointment && editing) {
 				const id = encodeURIComponent(appointment.id);
 				if (notesDirty) await api.patch('/v1/bookings/' + id, { notes: notes.trim() });
 				if (timeDirty) await api.patch('/v1/bookings/' + id + '/reschedule', { start_at: startAt(), end_at: endAt() });
+				result = timeDirty ? { kind: 'rescheduled', name: attendee?.name, startAt: startAt() } : { kind: 'updated', name: attendee?.name };
 			} else if (kind === 'booking') {
 				const payload = {
 					staff_id: staffID, start_at: startAt(), duration_minutes: duration,
@@ -237,10 +236,11 @@
 					idempotencyKey = crypto.getRandomValues(new Uint32Array(4)).join('-');
 				}
 				await api.post('/v1/schedule/bookings', payload, { 'Idempotency-Key': idempotencyKey });
+				result = { kind: 'created', name: name.trim(), startAt: payload.start_at };
 			} else {
 				return;
 			}
-			onSaved();
+			onSaved(result);
 		} catch (failure) {
 			error = failure instanceof RangeError ? $t('schedule.invalidTime')
 				: failure instanceof Error ? failure.message : $t('common.error');
@@ -252,7 +252,7 @@
 </script>
 
 <form onsubmit={save}>
-	<div class="space-y-6 px-6 py-6">
+	<div class="space-y-5 px-5 py-5">
 		{#if remoteNotice}
 			<div role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
 				<span>{$t(remoteNotice === 'changed' ? 'schedule.live.changedBanner' : remoteNotice === 'cancelled' ? 'schedule.live.cancelledBanner' : 'schedule.live.removedBanner')}</span>
@@ -276,7 +276,7 @@
 				</span>
 			</div>
 			{#if !editing}
-				<div class="grid gap-4 rounded-xl border bg-muted/15 p-4 sm:grid-cols-2">
+				<div class="grid grid-cols-2 gap-4 rounded-xl border bg-muted/15 p-4">
 					<div class="flex items-start gap-2.5 text-sm"><CalendarDays class="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{formatDate(appointment.start_at)}</span></div>
 					<div class="flex items-start gap-2.5 text-sm"><Clock3 class="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span class="tabular-nums">{formatTime(appointment.start_at)}–{formatTime(appointment.end_at)} <span class="text-muted-foreground">· {Math.round((Date.parse(appointment.end_at) - Date.parse(appointment.start_at)) / 60000)} {$t('schedule.minuteUnit')}</span></span></div>
 					<div class="flex items-start gap-2.5 text-sm"><UserRound class="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{appointment.host_name || staffName}</span></div>
@@ -289,18 +289,6 @@
 					<p class="whitespace-pre-wrap break-words rounded-xl border bg-muted/15 p-4 text-sm">{appointment.notes}</p>
 				</div>
 			{/if}
-		{:else if kind === 'removeDayOff' && dayOff}
-			<div class="space-y-3 rounded-xl border bg-muted/15 p-4 text-sm">
-				<p class="font-medium">{parseDate(dayOff.date).toDate('UTC').toLocaleDateString($localeTag, { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-				{#if dayOff.notes}<p class="whitespace-pre-wrap break-words text-muted-foreground">{dayOff.notes}</p>{/if}
-			</div>
-			<p class="text-sm text-muted-foreground">{$t('schedule.removeDayOffHelp')}</p>
-		{:else if kind === 'removeBreak' && breakItem}
-			<div class="rounded-xl border bg-muted/15 p-4">
-				<p class="font-medium">{breakItem.title}</p>
-				<p class="mt-1 text-sm tabular-nums text-muted-foreground">{breakItem.date || initialDate} · {breakItem.start_time}–{breakItem.end_time}</p>
-			</div>
-			<p class="text-sm text-muted-foreground">{$t(breakItem.kind === 'weekly' ? 'schedule.removeRecurringBreakHelp' : 'schedule.removeBreakHelp')}</p>
 		{/if}
 
 		{#if kind === 'booking'}
@@ -308,7 +296,7 @@
 				<Label for="schedule-attendee">{$t('schedule.attendee')}</Label>
 				<Input id="schedule-attendee" class="h-11 bg-muted/15 shadow-xs" bind:value={name} autocomplete="name" required />
 			</div>
-			<div class="grid grid-cols-[150px_minmax(0,1fr)] gap-3">
+			<div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
 				<div class="space-y-2">
 					<Label for="schedule-contact-method">{$t('schedule.contactMethod')}</Label>
 					<Select.Root type="single" bind:value={contactMethod} onValueChange={() => contact = ''}>
@@ -331,8 +319,8 @@
 		{/if}
 
 		{#if kind === 'booking' || kind === 'break' || (kind === 'details' && editing)}
-			<div class="grid gap-4 {kind === 'booking' ? 'sm:grid-cols-3' : kind === 'details' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}">
-				<div class="space-y-2">
+			<div class="grid grid-cols-2 gap-4">
+				<div class="space-y-2 {kind === 'break' ? '' : 'col-span-2'}">
 					<Label for="schedule-date">{$t('schedule.date')}</Label>
 					<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone}
 						class="h-11 w-full bg-muted/15 shadow-xs" />
@@ -355,7 +343,7 @@
 				{/if}
 			</div>
 			{#if kind === 'break'}
-				<div class="grid gap-4 sm:grid-cols-2">
+				<div class="grid grid-cols-2 gap-4">
 					<div class="space-y-2">
 						<Label for="schedule-end">{$t('schedule.end')}</Label>
 						<TimePicker id="schedule-end" label={$t('schedule.end')} bind:value={end} />
@@ -387,7 +375,6 @@
 				<p role="status" class="text-sm text-muted-foreground">{$t('schedule.timeUnavailable')}</p>
 			{/if}
 		{/if}
-		{#if confirmingCancel}<p class="rounded-lg bg-destructive/5 p-3 text-sm text-destructive">{$t('schedule.cancelHelp')}</p>{/if}
 		{#if kind === 'booking' || kind === 'dayOff' || editing}
 			<div class="space-y-2">
 				<Label for="schedule-notes">{$t(kind === 'dayOff' ? 'schedule.dayOffReason' : 'schedule.notes')} <span class="font-normal text-muted-foreground">{$t('common.optional')}</span></Label>
@@ -397,19 +384,16 @@
 		{#if error}<p role="alert" class="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>{/if}
 	</div>
 
-	<div class="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/10 px-6 py-4">
+	<div class="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t bg-background px-5 py-3">
 		{#if kind === 'details' && !editing}
 			<Button variant="outline" type="button" onclick={onDismiss}>{$t('common.close')}</Button>
-		{:else if kind === 'details' && confirmingCancel}
-			<Button variant="outline" type="button" disabled={saving} onclick={() => confirmingCancel = false}>{$t('common.back')}</Button>
-			<Button variant="destructive" type="button" disabled={saving} onclick={cancelAppointment}>{$t(saving ? 'common.saving' : 'schedule.cancelBooking')}</Button>
 		{:else}
 			{#if kind === 'details'}
-				<Button variant="ghost" type="button" class="mr-auto text-destructive hover:bg-destructive/5 hover:text-destructive" disabled={saving} onclick={() => confirmingCancel = true}>{$t('schedule.cancelBooking')}</Button>
+				<Button variant="ghost" type="button" class="mr-auto text-destructive hover:bg-destructive/5 hover:text-destructive" disabled={saving} onclick={onCancelBooking}>{$t('schedule.cancelBooking')}</Button>
 			{/if}
 			<Button variant="outline" type="button" disabled={saving} onclick={onDismiss}>{$t(kind === 'details' ? 'common.close' : 'common.cancel')}</Button>
-			<Button type="submit" variant={kind === 'removeBreak' || kind === 'removeDayOff' ? 'destructive' : 'default'} disabled={saving || (kind === 'details' ? (!timeDirty && !notesDirty) || timeBlocked : needsAvailability && !timeAvailable)}>
-				{$t(saving ? 'common.saving' : kind === 'removeBreak' || kind === 'removeDayOff' ? 'common.delete' : kind === 'booking' ? 'schedule.newBooking' : 'common.save')}
+			<Button type="submit" disabled={saving || (kind === 'details' ? (!timeDirty && !notesDirty) || timeBlocked : needsAvailability && !timeAvailable)}>
+				{$t(saving ? 'common.saving' : kind === 'booking' ? 'schedule.newBooking' : 'common.save')}
 			</Button>
 		{/if}
 	</div>

@@ -15,16 +15,17 @@
 	import { diffBookings, isEmptyDiff } from '$lib/live/diff';
 	import { t, localeTag } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
+	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
 	import * as Select from '$lib/components/ui/select';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Calendar } from '$lib/components/ui/calendar';
 	import { buttonVariants } from '$lib/components/ui/button';
-	import ScheduleForm from './schedule/schedule-form.svelte';
+	import ScheduleForm, { type SavedResult } from './schedule/schedule-form.svelte';
+	import EventSurface, { type Anchor } from './schedule/event-surface.svelte';
 	import CalendarGrid, { type GridBlock, type GridColumn } from './schedule/calendar-grid.svelte';
 
 	type Window = { start_at: string; end_at: string };
-	type Editor = 'booking' | 'break' | 'details' | 'removeBreak' | 'dayOff' | 'removeDayOff';
+	type Editor = 'booking' | 'break' | 'details' | 'dayOff';
 
 	let staff = $state<Pick<TeamMember, 'id' | 'name' | 'email' | 'timezone'>[]>([]);
 	let staffID = $state('');
@@ -50,6 +51,13 @@
 	let initialDate = $state('');
 	let initialTime = $state('');
 	let target = $state<Booking | DoctorBreak | ScheduleDay>();
+	// Where the open surface is anchored (null = centred dialog), unsaved-edit and confirmation state.
+	let anchor = $state<Anchor | null>(null);
+	let formDirty = $state(false);
+	let discardOpen = $state(false);
+	let cancelOpen = $state(false);
+	let removal = $state<{ kind: 'break'; item: DoctorBreak } | { kind: 'dayOff'; item: ScheduleDay } | null>(null);
+	let removalOpen = $state(false);
 
 	// Live-update state. `lastUpdated`/`liveFailed` drive the header indicator; `pulse` marks
 	// blocks that just arrived or changed remotely; `remoteNotice` warns an open booking form.
@@ -408,14 +416,19 @@
 		event.preventDefault();
 	}
 
-	function open(kind: Editor, date = defaultDate(), time = '09:00', item?: Booking | DoctorBreak | ScheduleDay) {
+	function open(kind: Editor, date = defaultDate(), time = '09:00', item?: Booking | DoctorBreak | ScheduleDay, at: Anchor | null = null) {
 		editor = kind;
+		anchor = at;
+		formDirty = false;
 		initialDate = date;
 		initialTime = time;
 		target = item;
 		remoteNotice = '';
 		remoteFresh = undefined;
-		dialogOpen = true;
+		// A popover opened inside the click that triggered it would see that same click as an
+		// outside interaction and close at once, so anchored surfaces open on the next tick.
+		if (at) setTimeout(() => (dialogOpen = true), 0);
+		else dialogOpen = true;
 	}
 
 	function defaultDate() {
@@ -424,24 +437,85 @@
 		return (weekOf(current).compare(week) === 0 ? current : week).toString();
 	}
 
-	function onSlot(day: CalendarDate, minute: number) {
-		open('booking', day.toString(), clock(minute));
+	function onSlot(day: CalendarDate, minute: number, at: Anchor) {
+		open('booking', day.toString(), clock(minute), undefined, at);
 	}
 
-	function onBlock(day: CalendarDate, block: GridBlock) {
-		open(block.kind === 'break' ? 'removeBreak' : 'details', day.toString(), clock(block.start), block.item);
+	function onBlock(day: CalendarDate, block: GridBlock, at: Anchor) {
+		if (block.kind === 'break') {
+			removal = { kind: 'break', item: block.item as DoctorBreak };
+			removalOpen = true;
+		} else {
+			open('details', day.toString(), clock(block.start), block.item, at);
+		}
 	}
 
 	function onDayOff(off: ScheduleDay) {
-		open('removeDayOff', off.date, '09:00', off);
+		removal = { kind: 'dayOff', item: off };
+		removalOpen = true;
 	}
 
-	function saved() {
-		dialogOpen = false;
-		toast.success($t('schedule.saved'));
+	// Every way of dismissing the surface goes through here so unsaved edits are never lost silently.
+	function requestClose() {
+		if (formDirty) discardOpen = true;
+		else dialogOpen = false;
+	}
+
+	function quietRefresh() {
 		// Own edit: refresh quietly and do not announce it back as a remote change.
 		void load({ silent: true, notify: false, breaks: true }).catch(() => {});
 	}
+
+	function saved(result: SavedResult) {
+		dialogOpen = false;
+		formDirty = false;
+		const name = result.name || $t('schedule.appointment');
+		const when = result.startAt ? whenLabel(result.startAt) : '';
+		toast.success(
+			result.kind === 'created' ? $t('schedule.toast.created', { name, when })
+			: result.kind === 'rescheduled' ? $t('schedule.toast.rescheduled', { name, when })
+			: result.kind === 'updated' ? $t('schedule.toast.updated', { name })
+			: result.kind === 'breakAdded' ? $t('schedule.toast.breakAdded')
+			: $t('schedule.toast.dayOffAdded')
+		);
+		quietRefresh();
+	}
+
+	async function cancelBooking() {
+		const booking = target && 'start_at' in target ? target : undefined;
+		if (!booking) return;
+		try {
+			await api.post('/v1/bookings/' + encodeURIComponent(booking.id) + '/cancel', {});
+			dialogOpen = false;
+			formDirty = false;
+			toast.success($t('schedule.toast.cancelled', { name: booking.attendees[0]?.name || $t('schedule.appointment'), when: whenLabel(booking.start_at) }));
+			quietRefresh();
+		} catch (failure) {
+			toast.error(failure instanceof Error ? failure.message : $t('common.error'));
+		}
+	}
+
+	async function confirmRemoval() {
+		const current = removal;
+		if (!current) return;
+		try {
+			if (current.kind === 'break') {
+				await api.del('/v1/doctor-breaks/' + encodeURIComponent(current.item.id));
+				toast.success($t('schedule.toast.breakRemoved'));
+			} else if (current.item.override_id) {
+				await api.del('/v1/availability-overrides/' + encodeURIComponent(current.item.override_id));
+				toast.success($t('schedule.toast.dayOffRemoved'));
+			}
+			quietRefresh();
+		} catch (failure) {
+			toast.error(failure instanceof Error ? failure.message : $t('common.error'));
+		}
+	}
+
+	const surfaceTitle = $derived($t(editor === 'dayOff' ? 'schedule.addDayOff' : editor === 'break' ? 'schedule.addBreak' : editor === 'details' ? 'schedule.bookingDetails' : 'schedule.newBooking'));
+	const removalText = $derived(removal?.kind === 'break'
+		? { title: $t('schedule.removeBreak'), description: removal.item.title + ' · ' + removal.item.start_time + '–' + removal.item.end_time + '. ' + $t(removal.item.kind === 'weekly' ? 'schedule.removeRecurringBreakHelp' : 'schedule.removeBreakHelp') }
+		: { title: $t('schedule.removeDayOff'), description: (removal?.item.date ?? '') + '. ' + $t('schedule.removeDayOffHelp') });
 </script>
 
 <svelte:head><title>{$t('schedule.title')} — Calnode</title></svelte:head>
@@ -530,14 +604,12 @@
 	</section>
 </div>
 
-<Dialog.Root bind:open={dialogOpen}>
-	<Dialog.Content class="max-h-[90dvh] max-w-[calc(100%-2rem)] gap-0 overflow-y-auto rounded-2xl p-0 sm:max-w-[640px]">
-		<Dialog.Header class="border-b px-6 py-5 pr-12">
-			<Dialog.Title>{$t(editor === 'dayOff' ? 'schedule.addDayOff' : editor === 'removeDayOff' ? 'schedule.removeDayOff' : editor === 'break' ? 'schedule.addBreak' : editor === 'details' ? 'schedule.bookingDetails' : editor === 'removeBreak' ? 'schedule.removeBreak' : 'schedule.newBooking')}</Dialog.Title>
-			<Dialog.Description class={editor === 'details' ? 'sr-only' : ''}>{staff.find((member) => member.id === staffID)?.name || timezone}</Dialog.Description>
-		</Dialog.Header>
-		{#if dialogOpen}
-			<ScheduleForm kind={editor} {staffID} {timezone} {initialDate} {initialTime} {target} staffName={staff.find((member) => member.id === staffID)?.name || ''} remoteNotice={remoteNotice} onLoadLatest={loadLatest} onSaved={saved} onDismiss={() => dialogOpen = false} />
-		{/if}
-	</Dialog.Content>
-</Dialog.Root>
+<EventSurface open={dialogOpen} {anchor} title={surfaceTitle} description={staff.find((member) => member.id === staffID)?.name || timezone} onRequestClose={requestClose} locked={discardOpen || cancelOpen || removalOpen}>
+	{#if dialogOpen}
+		<ScheduleForm kind={editor} {staffID} {timezone} {initialDate} {initialTime} {target} staffName={staff.find((member) => member.id === staffID)?.name || ''} remoteNotice={remoteNotice} bind:dirty={formDirty} onLoadLatest={loadLatest} onCancelBooking={() => (cancelOpen = true)} onSaved={saved} onDismiss={requestClose} />
+	{/if}
+</EventSurface>
+
+<ConfirmDialog bind:open={discardOpen} title={$t('schedule.discard.title')} description={$t('schedule.discard.description')} confirmText={$t('schedule.discard.confirm')} cancelText={$t('schedule.discard.keep')} destructive onConfirm={() => { dialogOpen = false; formDirty = false; }} />
+<ConfirmDialog bind:open={cancelOpen} title={$t('schedule.cancelBooking')} description={$t('schedule.cancelHelp')} confirmText={$t('schedule.cancelBooking')} destructive onConfirm={cancelBooking} />
+<ConfirmDialog bind:open={removalOpen} title={removalText.title} description={removalText.description} confirmText={$t('common.delete')} destructive onConfirm={confirmRemoval} />
