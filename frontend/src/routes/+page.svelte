@@ -3,7 +3,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
-	import { parseDate, today, type CalendarDate } from '@internationalized/date';
+	import { parseDate, parseDateTime, today, toZoned, type CalendarDate } from '@internationalized/date';
 	import { CalendarOff, ChevronLeft, ChevronRight, Coffee, Keyboard, Plus, RefreshCw, Settings2, UserRound, WifiOff } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { api, type Booking, type DoctorBreak, type ScheduleDay, type TeamMember } from '$lib/api';
@@ -41,7 +41,7 @@
 	let helpOpen = $state(false);
 	const shortcuts = [
 		['\u2190  \u2192', 'schedule.shortcuts.step'], ['T', 'schedule.shortcuts.today'], ['N', 'schedule.shortcuts.new'],
-		['W', 'schedule.shortcuts.week'], ['D', 'schedule.shortcuts.day'], ['Esc', 'schedule.shortcuts.close'], ['?', 'schedule.shortcuts.help']
+		['W', 'schedule.shortcuts.week'], ['D', 'schedule.shortcuts.day'], ['Esc', 'schedule.shortcuts.close'], ['\u2725', 'schedule.shortcuts.drag'], ['?', 'schedule.shortcuts.help']
 	];
 	let loaded = $state(false);
 	const days = $derived(view === 'week' ? Array.from({ length: 7 }, (_, i) => week.add({ days: i })) : [focus]);
@@ -66,6 +66,8 @@
 	let cancelOpen = $state(false);
 	let removal = $state<{ kind: 'break'; item: DoctorBreak } | { kind: 'dayOff'; item: ScheduleDay } | null>(null);
 	let removalOpen = $state(false);
+	let moveRequest = $state<{ booking: Booking; day: CalendarDate; minute: number } | null>(null);
+	let moveOpen = $state(false);
 
 	// Live-update state. `lastUpdated`/`liveFailed` drive the header indicator; `pulse` marks
 	// blocks that just arrived or changed remotely; `remoteNotice` warns an open booking form.
@@ -474,6 +476,40 @@
 		}
 	}
 
+	function moveTimes(request: { booking: Booking; day: CalendarDate; minute: number }) {
+		const length = Date.parse(request.booking.end_at) - Date.parse(request.booking.start_at);
+		const start = toZoned(parseDateTime(request.day.toString() + 'T' + clock(request.minute)), timezone, 'compatible').toDate();
+		return { start: start.toISOString(), end: new Date(start.getTime() + length).toISOString() };
+	}
+
+	function onMove(block: GridBlock, day: CalendarDate, minute: number) {
+		moveRequest = { booking: block.item as Booking, day, minute };
+		moveOpen = true;
+	}
+
+	async function confirmMove() {
+		const request = moveRequest;
+		if (!request) return;
+		const { start, end } = moveTimes(request);
+		markOwnEdit();
+		try {
+			await api.patch('/v1/bookings/' + encodeURIComponent(request.booking.id) + '/reschedule', { start_at: start, end_at: end });
+			toast.success($t('schedule.toast.rescheduled', { name: request.booking.attendees[0]?.name || $t('schedule.appointment'), when: whenLabel(start) }));
+		} catch (failure) {
+			toast.error(failure instanceof Error ? failure.message : $t('common.error'));
+		}
+		quietRefresh();
+	}
+
+	const moveText = $derived.by(() => {
+		if (!moveRequest) return '';
+		return $t('schedule.move.description', {
+			name: moveRequest.booking.attendees[0]?.name || $t('schedule.appointment'),
+			from: whenLabel(moveRequest.booking.start_at),
+			to: whenLabel(moveTimes(moveRequest).start)
+		});
+	});
+
 	function onDayOff(off: ScheduleDay) {
 		removal = { kind: 'dayOff', item: off };
 		removalOpen = true;
@@ -550,8 +586,8 @@
 
 <div class="mx-auto flex h-full min-h-0 max-w-[1800px] flex-col gap-4 px-4 py-4 sm:px-7 sm:py-6">
 	<header class="flex shrink-0 flex-wrap items-center gap-3">
-		<h1 class="mr-1 text-2xl font-semibold tracking-tight">{$t('schedule.title')}</h1>
-		<div class="flex flex-wrap items-center gap-1">
+		<h1 class="mr-1 text-2xl font-semibold tracking-tight max-sm:hidden">{$t('schedule.title')}</h1>
+		<div class="flex flex-wrap items-center gap-1 max-sm:w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:pb-0.5 max-sm:[&>*]:shrink-0">
 			<Button variant="outline" size="sm" onclick={goToday} disabled={!staffID}>{$t('schedule.today')}</Button>
 			<Button variant="ghost" size="icon" aria-label={$t(view === 'week' ? 'schedule.previous' : 'schedule.previousDay')} onclick={() => step(-1)}><ChevronLeft class="size-4" /></Button>
 			<Button variant="ghost" size="icon" aria-label={$t(view === 'week' ? 'schedule.next' : 'schedule.nextDay')} onclick={() => step(1)}><ChevronRight class="size-4" /></Button>
@@ -569,7 +605,7 @@
 				{/each}
 			</div>
 		</div>
-		<div class="ml-auto flex flex-wrap items-center gap-2">
+		<div class="ml-auto flex flex-wrap items-center gap-2 max-sm:ml-0 max-sm:w-full max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:pb-0.5 max-sm:[&>*]:shrink-0">
 			<div class="flex items-center gap-1 text-xs text-muted-foreground">
 				{#if liveFailed}
 					<span role="status" class="flex items-center gap-1 text-amber-700 dark:text-amber-400"><WifiOff class="size-3.5" />{$t('schedule.live.offline')}</span>
@@ -637,7 +673,7 @@
 		{:else}
 			<!-- Stays mounted while a new week loads (dimmed), so scroll position and context survive. -->
 			<div class="flex min-h-0 flex-1 flex-col transition-opacity {loading ? 'opacity-60' : ''}" aria-busy={loading}>
-				<CalendarGrid {columns} {timezone} {pulse} {noHours} single={view === 'day'} {onSlot} {onBlock} {onDayOff} onDayClick={(day) => setView('day', day)} />
+				<CalendarGrid {columns} {timezone} {pulse} {noHours} single={view === 'day'} {onSlot} {onBlock} {onDayOff} {onMove} onDayClick={(day) => setView('day', day)} />
 			</div>
 		{/if}
 	</section>
@@ -650,6 +686,7 @@
 </EventSurface>
 
 <ConfirmDialog bind:open={discardOpen} title={$t('schedule.discard.title')} description={$t('schedule.discard.description')} confirmText={$t('schedule.discard.confirm')} cancelText={$t('schedule.discard.keep')} destructive onConfirm={() => { dialogOpen = false; formDirty = false; }} />
+<ConfirmDialog bind:open={moveOpen} title={$t('schedule.move.title')} description={moveText} confirmText={$t('schedule.move.confirm')} onConfirm={confirmMove} />
 <ConfirmDialog bind:open={cancelOpen} title={$t('schedule.cancelBooking')} description={$t('schedule.cancelHelp')} confirmText={$t('schedule.cancelBooking')} destructive onConfirm={cancelBooking} />
 <ConfirmDialog bind:open={removalOpen} title={removalText.title} description={removalText.description} confirmText={$t('common.delete')} destructive onConfirm={confirmRemoval} />
 

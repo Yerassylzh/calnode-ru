@@ -36,7 +36,8 @@
 		onSlot,
 		onBlock,
 		onDayOff,
-		onDayClick
+		onDayClick,
+		onMove
 	}: {
 		columns: GridColumn[];
 		timezone: string;
@@ -50,6 +51,8 @@
 		onBlock: (day: CalendarDate, block: GridBlock, anchor: Anchor) => void;
 		onDayOff: (off: ScheduleDay) => void;
 		onDayClick: (day: CalendarDate) => void;
+		/** A booking was dragged to a new day/start minute (the caller confirms and saves). */
+		onMove: (block: GridBlock, day: CalendarDate, minute: number) => void;
 	} = $props();
 
 	const px = (minutes: number) => (minutes / 60) * hourPx;
@@ -86,6 +89,53 @@
 
 	let ghost = $state<{ column: number; start: number; end: number } | null>(null);
 
+	// Drag a confirmed booking to another time or day (mouse only; the form is the keyboard route).
+	let columnEls = $state<(HTMLElement | undefined)[]>([]);
+	let drag = $state<{ block: GridBlock; startX: number; startY: number; grab: number; active: boolean; column: number; minute: number } | null>(null);
+	let suppressClick = false;
+	const DRAG_THRESHOLD = 6;
+
+	function beginDrag(event: PointerEvent, ci: number, block: GridBlock) {
+		if (event.button !== 0 || event.pointerType !== 'mouse' || block.kind !== 'booking' || block.status === 'cancelled') return;
+		const top = (event.currentTarget as HTMLElement).getBoundingClientRect().top;
+		drag = { block, startX: event.clientX, startY: event.clientY, grab: ((event.clientY - top) / hourPx) * 60, active: false, column: ci, minute: block.start };
+	}
+
+	function moveDrag(event: PointerEvent) {
+		if (!drag) return;
+		if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < DRAG_THRESHOLD) return;
+		const index = columnEls.findIndex((el) => {
+			const rect = el?.getBoundingClientRect();
+			return !!rect && event.clientX >= rect.left && event.clientX < rect.right;
+		});
+		const column = index === -1 ? drag.column : index;
+		const rect = columnEls[column]?.getBoundingClientRect();
+		if (!rect) return;
+		const length = drag.block.end - drag.block.start;
+		const raw = ((event.clientY - rect.top) / hourPx) * 60 - drag.grab;
+		const minute = Math.max(0, Math.min(1440 - length, Math.round(raw / 5) * 5));
+		drag = { ...drag, active: true, column, minute };
+	}
+
+	function endDrag() {
+		const current = drag;
+		drag = null;
+		if (!current?.active) return;
+		// The click that follows a drag must not also open the booking.
+		suppressClick = true;
+		setTimeout(() => (suppressClick = false), 0);
+		const day = columns[current.column]?.day;
+		const original = columns.findIndex((c) => c.blocks.some((b) => b.id === current.block.id && b.kind === 'booking'));
+		if (day && (current.column !== original || current.minute !== current.block.start)) onMove(current.block, day, current.minute);
+	}
+
+	function cancelDrag(event: KeyboardEvent) {
+		if (drag && event.key === 'Escape') {
+			drag = null;
+			event.stopPropagation();
+		}
+	}
+
 	function minuteAt(event: { clientY: number }, element: HTMLElement, span: Span) {
 		const rect = element.getBoundingClientRect();
 		return snapInSpan(span.start + ((event.clientY - rect.top) / hourPx) * 60, span);
@@ -114,7 +164,9 @@
 	}
 </script>
 
-<div bind:this={scroller} class="relative min-h-0 flex-1 overflow-auto">
+<svelte:window onpointermove={moveDrag} onpointerup={endDrag} onkeydown={cancelDrag} />
+
+<div bind:this={scroller} class="relative min-h-0 flex-1 overflow-auto {drag?.active ? 'select-none cursor-grabbing' : ''}">
 	<div class="grid" style:grid-template-columns={`56px repeat(${columns.length}, minmax(0, 1fr))`} style:min-width={single ? undefined : '760px'}>
 		<div class="sticky left-0 top-0 z-40 h-11 border-b bg-card"></div>
 		{#each prepared as column (column.day.toString())}
@@ -140,7 +192,7 @@
 		</div>
 
 		{#each prepared as column, ci (column.day.toString())}
-			<div class="relative border-l" style:height={bodyHeight + 'px'}>
+			<div bind:this={columnEls[ci]} class="relative border-l" style:height={bodyHeight + 'px'}>
 				{#each column.closed as span (span.start)}
 					<div class="calendar-closed pointer-events-none absolute inset-x-0" style:top={px(span.start) + 'px'} style:height={px(span.end - span.start) + 'px'}></div>
 				{/each}
@@ -179,8 +231,9 @@
 				{#each column.placed as placed (placed.item.kind + placed.item.id)}
 					{@const block = placed.item}
 					{@const height = Math.max(px(block.end - block.start) - 2, 18)}
-					<button type="button" onclick={(event) => onBlock(column.day, block, anchorFromRect((event.currentTarget as HTMLElement).getBoundingClientRect()))}
-						class="absolute z-10 flex flex-col items-start overflow-hidden rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-xs leading-tight shadow-sm ring-1 ring-inset ring-black/5 transition hover:brightness-95 focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-primary {tone(block)} {block.kind === 'booking' && pulse.has(block.id) ? 'live-flash' : ''}"
+					<button type="button" onpointerdown={(event) => beginDrag(event, ci, block)}
+						onclick={(event) => { if (suppressClick) return; onBlock(column.day, block, anchorFromRect((event.currentTarget as HTMLElement).getBoundingClientRect())); }}
+						class="absolute z-10 flex flex-col items-start overflow-hidden rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-xs leading-tight shadow-sm ring-1 ring-inset ring-black/5 transition hover:brightness-95 focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-primary {tone(block)} {block.kind === 'booking' && pulse.has(block.id) ? 'live-flash' : ''} {drag?.active && drag.block.id === block.id ? 'opacity-40' : ''} {block.kind === 'booking' && block.status !== 'cancelled' ? 'cursor-grab' : ''}"
 						style:top={px(block.start) + 1 + 'px'} style:height={height + 'px'}
 						style:left={`calc(${(placed.col / placed.cols) * 100}% + 2px)`} style:width={`calc(${100 / placed.cols}% - 4px)`}
 						title={block.label + ' · ' + label(block.start) + '–' + label(block.end)}
@@ -190,6 +243,14 @@
 						{#if height >= 52 && block.phone}<span class="block w-full truncate text-[11px] tabular-nums opacity-75">{block.phone}</span>{/if}
 					</button>
 				{/each}
+
+				{#if drag?.active && drag.column === ci}
+					<div class="pointer-events-none absolute inset-x-1 z-30 overflow-hidden rounded-md border-2 border-primary bg-primary/15 px-1.5 py-0.5 text-xs leading-tight text-primary shadow-lg"
+						style:top={px(drag.minute) + 'px'} style:height={Math.max(px(drag.block.end - drag.block.start) - 2, 18) + 'px'}>
+						<span class="block truncate font-medium">{drag.block.label}</span>
+						<span class="block truncate tabular-nums opacity-80">{label(drag.minute)}–{label(drag.minute + drag.block.end - drag.block.start)}</span>
+					</div>
+				{/if}
 
 				{#if ghost && ghost.column === ci}
 					<div class="pointer-events-none absolute inset-x-1 z-[8] overflow-hidden rounded-md border border-dashed border-primary/60 bg-primary/10 px-1.5 py-0.5 text-xs leading-tight text-primary"

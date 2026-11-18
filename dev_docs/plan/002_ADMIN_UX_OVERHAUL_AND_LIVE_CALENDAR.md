@@ -1,6 +1,6 @@
 ﻿# 002 — Admin UX overhaul: leaner navigation, enterprise-grade calendar interactions, live bookings
 
-Status: Phases 0-7 implemented (Phase 6 in part) (2026-11-18, see sections 10-16).
+Status: Phases 0-7 implemented (2026-11-18, see sections 10-17); open items are listed at the end of section 17.
 Prepared: 2026-11-18.
 
 ## 1. Objective and ground rules
@@ -370,3 +370,13 @@ Verification: Go tests run in the `golang:1.27.2-alpine` image already on this m
 Not verified: the browser UI against the real server (the email login is disabled on a fresh instance and the session cookie is HttpOnly, so the pane could not be signed in), multi-instance deployments (the hub is in-process; fine for the single-binary SQLite design in CLAUDE.md), and behaviour behind a buffering reverse proxy (the response sets `X-Accel-Buffering: no`).
 
 Pre-existing, unrelated, left alone: `internal/server` `TestRateLimit_returns429AfterLimit` and `TestRateLimit_retryAfterHeader` fail because request rate limiting was removed in commit `f254f42` without updating those tests, and `gofmt` flags `internal/handler/reschedule_handler.go`.
+
+## 17. Phase 6 completion record (2026-11-18)
+
+- **Drag to move:** a confirmed booking can be dragged (mouse) to another time or day in the grid. A 6 px threshold separates a drag from a click, the target snaps to 5 min and keeps the duration, a ghost shows the new slot and Esc cancels. Releasing opens a "Move X from A to B?" confirmation; confirming sends the existing `PATCH /v1/bookings/{id}/reschedule` (the server still validates, so conflicts come back as an error toast), and the booking form remains the keyboard route. The click that ends a drag no longer opens the booking.
+- **Phone header:** the calendar header went from about 330 px to 86 px: two single-line rows that scroll sideways, and the page title is hidden under 640 px.
+- Verified against the mock API in the in-app browser: below-threshold movement did not start a drag; dragging Wed 10:00 to Thu 11:00 showed the ghost "11:00-12:00", the confirmation text, no stray popover, and sent `PATCH .../reschedule {"start_at":"2026-11-19T06:00:00.000Z","end_at":"2026-11-19T07:00:00.000Z"}` (Thu 11:00 Asia/Almaty); at 375 px the header measured 86 px with no horizontal page overflow. `pnpm check` 0 errors, `pnpm test:visual` 51/51, build OK.
+
+**Decided not to build** (the existing UI covers them): a user dropdown menu and a mobile slide-over sheet (the sidebar already has the same actions as a collapsible rail and a phone overlay), and merging Settings into one page (Profile and Notifications each own a form with its own `Ctrl+S`).
+
+**Still open:** an automated accessibility audit. Adding `axe-core` (a dev dependency) to run it inside the existing Vitest browser setup was not done because it means installing a new package; run axe or Lighthouse before release. Also drag-to-resize (changing duration by dragging a block's bottom edge) and a full Russian copy review of the older catalogs.
