@@ -3,9 +3,8 @@
 </script>
 
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { parseAbsolute, parseDate, parseDateTime, toZoned } from '@internationalized/date';
-	import { CalendarDays, Clock3, Mail, MapPin, Phone, UserRound } from '@lucide/svelte';
+	import { parseAbsolute, parseDate, parseDateTime, today, toZoned } from '@internationalized/date';
+	import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Mail, MapPin, Phone, UserRound } from '@lucide/svelte';
 	import { api, type Booking, type DoctorBreak, type ScheduleDay } from '$lib/api';
 	import { localeTag, t } from '$lib/i18n';
 	import { Button } from '$lib/components/ui/button';
@@ -14,7 +13,12 @@
 	import { Label } from '$lib/components/ui/label';
 	import { DatePicker } from '$lib/components/ui/date-picker';
 	import * as Select from '$lib/components/ui/select';
+	import { createStartChecker } from '$lib/schedule/slots';
+	import { isValidPhone, normalizePhone } from '$lib/phone';
 	import TimePicker from './time-picker.svelte';
+	import SlotPicker from './slot-picker.svelte';
+	import DurationChips from './duration-chips.svelte';
+	import PhoneField from './phone-field.svelte';
 
 	let { kind, staffID, staffName, timezone, initialDate, initialTime, target, remoteNotice = '', dirty = $bindable(false), onLoadLatest, onCancelBooking, onSaved, onDismiss }: {
 		kind: 'booking' | 'break' | 'details' | 'dayOff';
@@ -60,32 +64,17 @@
 	const clockRe = /^([01]\d|2[0-3]):[0-5]\d$/;
 	const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
 	const toClock = (minutes: number) => [Math.floor(minutes / 60), minutes % 60].map((part) => String(part).padStart(2, '0')).join(':');
-	// While editing an appointment the length is whatever start..end the manager
-	// picked, so the free-window check below runs against the new length.
-	const editedMinutes = $derived(clockRe.test(start) && clockRe.test(end) ? toMinutes(end) - toMinutes(start) : 0);
-	const endValid = $derived(!(kind === 'details' && editing) || editedMinutes > 0);
-	const appointmentMinutes = $derived(kind === 'details' && appointment
-		? (editing && editedMinutes > 0 ? editedMinutes : Math.ceil((Date.parse(appointment.end_at) - Date.parse(appointment.start_at)) / 60000))
+	// The length is the chosen duration (chips); the end is derived from it, never typed.
+	const endValid = $derived(!(kind === 'details' && editing) || (!!duration && duration > 0));
+	const appointmentMinutes = $derived(kind === 'details' && appointment && !editing
+		? Math.ceil((Date.parse(appointment.end_at) - Date.parse(appointment.start_at)) / 60000)
 		: duration);
-	const allowedStarts = $derived.by(() => {
-		if (!needsAvailability) return undefined;
-		const result = new Set<number>();
-		if (availabilityLoading || availabilityError || !date || !appointmentMinutes) return result;
-		const windows = freeWindows.map((window) => ({ start: Date.parse(window.start_at), end: Date.parse(window.end_at) }));
-		for (let minute = 0; minute < 24 * 60; minute++) {
-			const time = [Math.floor(minute / 60), minute % 60].map((part) => String(part).padStart(2, '0')).join(':');
-			try {
-				const instant = toZoned(parseDateTime(date + 'T' + time), timezone, 'reject').toDate().getTime();
-				if (windows.some((window) => instant >= window.start && instant + appointmentMinutes * 60000 <= window.end)) result.add(minute);
-			} catch {
-				// A wall-clock minute can be absent or ambiguous at a timezone transition.
-			}
-		}
-		return result;
-	});
-	const timeAvailable = $derived(allowedStarts === undefined || (
-		/^([01]\d|2[0-3]):[0-5]\d$/.test(start) && allowedStarts.has(Number(start.slice(0, 2)) * 60 + Number(start.slice(3)))
-	));
+	const checker = $derived(createStartChecker({ windows: freeWindows, date, timezone, durationMinutes: appointmentMinutes ?? 0 }));
+	const slotsReady = $derived(needsAvailability && !availabilityLoading && !availabilityError && !!date && !!appointmentMinutes);
+	// undefined while loading (the picker shows its own status); chips step by 10 minutes, plus each window's own start.
+	const startList = $derived(slotsReady ? checker.starts(10) : needsAvailability && !availabilityLoading ? [] : undefined);
+	const timeAvailable = $derived(!needsAvailability || (slotsReady && clockRe.test(start) && checker.fits(toMinutes(start))));
+	const endsAt = $derived(clockRe.test(start) && duration && duration > 0 ? toClock(Math.min(1439, toMinutes(start) + duration)) : '');
 
 	$effect(() => {
 		availabilityVersion;
@@ -124,14 +113,16 @@
 	$effect(() => {
 		if (kind === 'details' && appointment) {
 			const local = parseAbsolute(appointment.start_at, timezone);
-			date = local.toString().slice(0, 10);
+			const day = local.toString().slice(0, 10);
+			date = day;
 			start = [local.hour, local.minute].map((value) => String(value).padStart(2, '0')).join(':');
 			notes = appointment.notes ?? '';
 			const localEnd = parseAbsolute(appointment.end_at, timezone);
 			// An end on a later calendar day can't be shown on one date; clamp to 23:59.
-			end = localEnd.toString().slice(0, 10) === date
+			end = localEnd.toString().slice(0, 10) === day
 				? [localEnd.hour, localEnd.minute].map((value) => String(value).padStart(2, '0')).join(':')
 				: '23:59';
+			duration = Math.max(1, Math.round((Date.parse(appointment.end_at) - Date.parse(appointment.start_at)) / 60000));
 		} else {
 			date = initialDate;
 			start = initialTime;
@@ -142,18 +133,18 @@
 		error = '';
 	});
 
-	// Moving the start while editing carries the end with it, so the length is
-	// kept until the manager edits the end themselves.
-	let prevStart = '';
+	// While editing, the end always follows start + duration.
 	$effect(() => {
-		const next = start;
-		if (kind === 'details' && editing && clockRe.test(next) && clockRe.test(prevStart)) {
-			untrack(() => {
-				if (clockRe.test(end)) end = toClock(Math.max(0, Math.min(1439, toMinutes(end) + toMinutes(next) - toMinutes(prevStart))));
-			});
-		}
-		prevStart = next;
+		if (kind === 'details' && editing && endsAt) end = endsAt;
 	});
+
+	function shiftDate(days: number) {
+		if (date) date = parseDate(date).add({ days }).toString();
+	}
+
+	function setDate(offset: number) {
+		date = today(timezone).add({ days: offset }).toString();
+	}
 
 	function formatDate(iso: string) {
 		return new Date(iso).toLocaleDateString($localeTag, { timeZone: timezone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -196,6 +187,13 @@
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
 		if (saving) return;
+		if (kind === 'booking' && contactMethod === 'phone') {
+			contact = normalizePhone(contact);
+			if (!isValidPhone(contact)) {
+				error = $t('schedule.phoneInvalid');
+				return;
+			}
+		}
 		if (timeDirty && !endValid) {
 			error = $t('schedule.endBeforeStart');
 			return;
@@ -311,9 +309,11 @@
 				</div>
 				<div class="space-y-2">
 					<Label for="schedule-contact">{$t(contactMethod === 'email' ? 'schedule.email' : 'schedule.phone')}</Label>
-					<Input id="schedule-contact" class="h-11 bg-muted/15 shadow-xs" type={contactMethod === 'email' ? 'email' : 'tel'} bind:value={contact}
-						pattern={contactMethod === 'phone' ? '\\+[1-9][0-9]{6,14}' : undefined}
-						placeholder={contactMethod === 'phone' ? '+77011234567' : undefined} required />
+					{#if contactMethod === 'phone'}
+						<PhoneField id="schedule-contact" bind:value={contact} />
+					{:else}
+						<Input id="schedule-contact" class="h-11 bg-muted/15 shadow-xs" type="email" bind:value={contact} required />
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -322,23 +322,37 @@
 			<div class="grid grid-cols-2 gap-4">
 				<div class="space-y-2 {kind === 'break' ? '' : 'col-span-2'}">
 					<Label for="schedule-date">{$t('schedule.date')}</Label>
-					<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone}
-						class="h-11 w-full bg-muted/15 shadow-xs" />
-				</div>
-				<div class="space-y-2">
-					<Label for="schedule-start">{$t('schedule.start')}</Label>
-					<TimePicker id="schedule-start" label={$t('schedule.start')} bind:value={start} allowedMinutes={allowedStarts} />
-				</div>
-				{#if kind === 'details'}
-					<div class="space-y-2">
-						<Label for="schedule-edit-end">{$t('schedule.end')}</Label>
-						<TimePicker id="schedule-edit-end" label={$t('schedule.end')} bind:value={end} />
+					<div class="flex items-center gap-1.5">
+						{#if kind !== 'break'}
+							<Button type="button" variant="outline" size="icon" class="h-11 w-9 shrink-0" aria-label={$t('schedule.previousDay')} onclick={() => shiftDate(-1)}><ChevronLeft class="size-4" /></Button>
+						{/if}
+						<DatePicker id="schedule-date" ariaLabel={$t('schedule.date')} bind:value={date} {timezone}
+							class="h-11 min-w-0 flex-1 bg-muted/15 shadow-xs" />
+						{#if kind !== 'break'}
+							<Button type="button" variant="outline" size="icon" class="h-11 w-9 shrink-0" aria-label={$t('schedule.nextDay')} onclick={() => shiftDate(1)}><ChevronRight class="size-4" /></Button>
+						{/if}
 					</div>
-				{/if}
-				{#if kind === 'booking'}
+					{#if kind !== 'break'}
+						<div class="flex gap-1.5">
+							<Button type="button" variant="ghost" size="sm" class="h-7 px-2 text-xs" onclick={() => setDate(0)}>{$t('schedule.today')}</Button>
+							<Button type="button" variant="ghost" size="sm" class="h-7 px-2 text-xs" onclick={() => setDate(1)}>{$t('schedule.tomorrow')}</Button>
+						</div>
+					{/if}
+				</div>
+				{#if kind === 'break'}
 					<div class="space-y-2">
+						<Label for="schedule-start">{$t('schedule.start')}</Label>
+						<TimePicker id="schedule-start" label={$t('schedule.start')} bind:value={start} />
+					</div>
+				{:else}
+					<div class="col-span-2 space-y-2">
+						<Label for="schedule-start">{$t('schedule.start')}</Label>
+						<SlotPicker id="schedule-start" label={$t('schedule.start')} bind:value={start} starts={startList} />
+					</div>
+					<div class="col-span-2 space-y-2">
 						<Label for="schedule-duration">{$t('schedule.duration')}</Label>
-						<Input id="schedule-duration" class="h-11 bg-muted/15 shadow-xs" type="number" min="1" max="1440" bind:value={duration} required />
+						<DurationChips id="schedule-duration" bind:value={duration} />
+						{#if endsAt}<p class="text-xs tabular-nums text-muted-foreground">{$t('schedule.endsAt', { time: endsAt })}</p>{/if}
 					</div>
 				{/if}
 			</div>
@@ -363,7 +377,7 @@
 		{/if}
 		{#if needsAvailability}
 			{#if availabilityLoading}
-				<p role="status" class="text-sm text-muted-foreground">{$t('schedule.checkingAvailability')}</p>
+				<!-- the slot picker shows its own loading state -->
 			{:else if availabilityError}
 				<div role="alert" class="flex items-center justify-between gap-3 text-sm text-destructive">
 					<span>{availabilityError}</span>

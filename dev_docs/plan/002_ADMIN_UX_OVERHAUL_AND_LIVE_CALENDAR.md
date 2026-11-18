@@ -1,6 +1,6 @@
 ﻿# 002 — Admin UX overhaul: leaner navigation, enterprise-grade calendar interactions, live bookings
 
-Status: Phases 0-4 implemented (2026-11-18, see sections 10-13); Phases 5-7 not started.
+Status: Phases 0-5 implemented (2026-11-18, see sections 10-14); Phases 6-7 not started.
 Prepared: 2026-11-18.
 
 ## 1. Objective and ground rules
@@ -334,3 +334,17 @@ Shipped (frontend only):
 Verification: `pnpm check` 0 errors, `pnpm test:visual` 38/38, build OK. Against the mock API in the in-app browser: clicking a booking opened a popover beside it with no overlay; a real click on a free slot opened the quick-create popover at the right time with Phone preselected; clean Escape closed it; with a typed name Escape showed the discard confirm, Keep editing preserved the input, Discard closed it; Cancel booking showed its confirm and then the toast "Booking cancelled: ... 10:00". Caveats: the pane was throttled in places (exit animations did not complete, and real keyboard Escape/clicks were unreliable), so several steps were driven with dispatched events; the break/day-off removal confirms and the phone bottom-sheet layout were not exercised by hand.
 
 Not done from section 4.2: separate `BookingCard` read-only-first view and a reduced "quick create" with a "More options" expander (the existing form is used in both roles), drag-to-create, and an undo window after cancelling (the API gives none).
+
+## 14. Phase 5 implementation record (2026-11-18) - pickers and one reschedule form
+
+Shipped (frontend only):
+- `lib/schedule/slots.ts`: `createStartChecker` replaces the 1,440-iteration brute force; returns `fits(minute)` and `starts(step)` (multiples of the step plus each free window's own start, so odd-minute gaps such as 11:10 are offered). DST-gap minutes are never offered.
+- `lib/phone.ts`: `normalizePhone` (accepts `+7 (701) 123-45-67`, `8 701 123 45 67`, `7011234567`, `0044...`) and `isValidPhone` (E.164).
+- `slot-picker.svelte`: bookable start times as chips grouped Morning/Afternoon/Evening, honouring the 12/24 h preference, with an "Other time" field; shows loading and "no free times" states. `duration-chips.svelte`: 10/15/20/30/45/60 plus a custom value; the end time is now shown ("Ends at 11:30") and derived, never typed (the old end-time picker and its silent end-carrying effect are gone). `phone-field.svelte`: normalises on blur and validates after leaving the field. The break form keeps the old `TimePicker` (breaks are not availability-bound).
+- Date control: previous/next-day buttons and Today/Tomorrow shortcuts next to the date picker.
+- **Bookings page now uses the same form** (`schedule-form.svelte`, kind `details`) in a dialog for rescheduling and cancelling, instead of an inline row with native date/time inputs and no availability check. `Booking` gained the `host_id` field the API already returns.
+- Fixed a latent bug: the details initialisation effect read `date`, so changing the date in an open booking silently reverted it.
+
+Verification: `pnpm check` 0 errors, `pnpm test:visual` 49/49 (11 new for slots and phone). Against the mock API in the in-app browser: the booking popover listed 09:00-16:00 chips for a 60 min booking with the current time selected and "Ends at 11:00"; choosing 11:00 then 30 min gave "Ends at 11:30"; next-day/Today/Tomorrow moved the date; a new booking via the header button normalised `8 (701) 123-45-67` to `+77011234567`, rejected `12345` with a message, and produced the toast "Booking created: Иванова Анна · 18 Wed, 09:00"; the Bookings page reschedule button opened the shared form with 49 slot chips and no legacy inline inputs. Go not run; availability in the mock ignores other bookings, so conflict (409) handling was not exercised.
+
+Not done from section 4.3/4.4: dimming days without availability in the date picker, existing-client autocomplete, a country selector for the phone field (default country is +7), inline click-to-edit notes with autosave, and drag-to-reschedule.

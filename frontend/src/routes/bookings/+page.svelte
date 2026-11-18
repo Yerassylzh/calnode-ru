@@ -10,8 +10,8 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Select from '$lib/components/ui/select';
-	import { Input } from '$lib/components/ui/input';
-	import { parseDateTime, toZoned, fromDate } from '@internationalized/date';
+	import ScheduleForm from '../schedule/schedule-form.svelte';
+	import EventSurface from '../schedule/event-surface.svelte';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
 
 	let items: Booking[] = $state([]);
@@ -43,11 +43,11 @@
 	const pageStart = $derived(total === 0 ? 0 : offset + 1);
 	const pageEnd = $derived(Math.min(offset + items.length, total));
 	let reschedulingId = $state<string | null>(null);
-	let rescheduleDate = $state('');
-	let rescheduleTime = $state('');
-	let rescheduleEndTime = $state('');
-	let rescheduling = $state(false);
-	let rescheduleError = $state('');
+	// Rescheduling reuses the calendar's booking form (slot picker, availability check), so both
+	// pages validate and word things identically.
+	let reschedulingTarget = $state<Booking | null>(null);
+	let formDirty = $state(false);
+	let discardOpen = $state(false);
 
 	type AnswerItem = { label: string; type: string; value: string };
 	let expandedId = $state<string | null>(null);
@@ -209,6 +209,7 @@
 		if (!id) return;
 		try {
 			await api.post(`/v1/bookings/${id}/cancel`, {});
+			if (reschedulingId === id) closeReschedule();
 			await load();
 		} catch (e: any) {
 			error = e.message;
@@ -220,37 +221,25 @@
 
 	function startReschedule(b: Booking) {
 		reschedulingId = b.id;
-		// Prefill with the current times (in the viewer's timezone) so a manager
-		// can nudge just the start or just the end.
-		const s = fromDate(new Date(b.start_at), $prefs.timezone);
-		const e = fromDate(new Date(b.end_at), $prefs.timezone);
-		const hm = (z: typeof s) => `${String(z.hour).padStart(2, '0')}:${String(z.minute).padStart(2, '0')}`;
-		rescheduleDate = s.toString().slice(0, 10);
-		rescheduleTime = hm(s);
-		rescheduleEndTime = hm(e);
-		rescheduleError = '';
+		reschedulingTarget = b;
+		formDirty = false;
+	}
+
+	function closeReschedule() {
+		reschedulingId = null;
+		reschedulingTarget = null;
+		formDirty = false;
 	}
 
 	function cancelReschedule() {
-		reschedulingId = null;
+		if (formDirty) discardOpen = true;
+		else closeReschedule();
 	}
 
-	async function confirmReschedule() {
-		if (!rescheduleDate || !rescheduleTime || !rescheduleEndTime || !reschedulingId) return;
-		rescheduling = true;
-		rescheduleError = '';
-		try {
-			await api.patch(`/v1/bookings/${reschedulingId}/reschedule`, {
-				start_at: toZoned(parseDateTime(rescheduleDate + 'T' + rescheduleTime), $prefs.timezone, 'reject').toDate().toISOString(),
-				end_at: toZoned(parseDateTime(rescheduleDate + 'T' + rescheduleEndTime), $prefs.timezone, 'reject').toDate().toISOString()
-			});
-			reschedulingId = null;
-			await load();
-		} catch (e: any) {
-			rescheduleError = e.message;
-		} finally {
-			rescheduling = false;
-		}
+	async function rescheduled() {
+		closeReschedule();
+		toast.success($t('bookings.reschedule.done'));
+		await load();
 	}
 
 	function fmt(iso: string) { return fmtDateTime(iso, $prefs); }
@@ -545,34 +534,6 @@
 						</tr>
 					{/if}
 
-					{#if reschedulingId === b.id}
-						<tr>
-							<td colspan={scope === 'all' ? 5 : 4} class="p-0">
-								<div class="border-t bg-muted/30 px-4 py-4">
-									<p class="mb-3 text-sm font-medium">{$t('bookings.reschedule.title', { name: b.attendees?.[0]?.name ?? $t('bookings.reschedule.attendeeFallback') })}</p>
-
-									<div class="flex flex-wrap items-end gap-3">
-										<label class="space-y-1 text-sm">
-											<span>{$t('schedule.date')}</span>
-											<Input type="date" bind:value={rescheduleDate} />
-										</label>
-										<label class="space-y-1 text-sm">
-											<span>{$t('schedule.start')} · {$prefs.timezone}</span>
-											<Input type="time" bind:value={rescheduleTime} />
-										</label>
-										<label class="space-y-1 text-sm">
-											<span>{$t('schedule.end')} · {$prefs.timezone}</span>
-											<Input type="time" bind:value={rescheduleEndTime} />
-										</label>
-										<Button onclick={confirmReschedule} disabled={rescheduling || !rescheduleDate || !rescheduleTime || !rescheduleEndTime}>
-											{$t(rescheduling ? 'common.saving' : 'common.save')}
-										</Button>
-									</div>
-									{#if rescheduleError}<p role="alert" class="mt-3 text-sm text-destructive">{rescheduleError}</p>{/if}
-								</div>
-							</td>
-						</tr>
-					{/if}
 				{/each}
 			</tbody>
 		</table>
@@ -601,4 +562,38 @@
 	cancelText={$t('bookings.cancelDialog.keep')}
 	destructive
 	onConfirm={cancel}
+/>
+
+<EventSurface
+	open={reschedulingTarget !== null}
+	title={$t('bookings.reschedule.title', { name: reschedulingTarget?.attendees?.[0]?.name ?? $t('bookings.reschedule.attendeeFallback') })}
+	description={reschedulingTarget?.host_name ?? ''}
+	onRequestClose={cancelReschedule}
+	locked={discardOpen || confirmOpen}
+>
+	{#if reschedulingTarget}
+		<ScheduleForm
+			kind="details"
+			staffID={reschedulingTarget.host_id ?? ''}
+			staffName={reschedulingTarget.host_name ?? ''}
+			timezone={$prefs.timezone}
+			initialDate=""
+			initialTime=""
+			target={reschedulingTarget}
+			bind:dirty={formDirty}
+			onCancelBooking={() => requestCancel(reschedulingTarget!.id)}
+			onSaved={rescheduled}
+			onDismiss={cancelReschedule}
+		/>
+	{/if}
+</EventSurface>
+
+<ConfirmDialog
+	bind:open={discardOpen}
+	title={$t('schedule.discard.title')}
+	description={$t('schedule.discard.description')}
+	confirmText={$t('schedule.discard.confirm')}
+	cancelText={$t('schedule.discard.keep')}
+	destructive
+	onConfirm={closeReschedule}
 />

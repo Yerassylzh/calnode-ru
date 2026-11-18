@@ -102,6 +102,7 @@ export type Question = {
 
 export type Booking = {
 	id: string;
+	host_id?: string;
 	notes?: string;
 	event_type_slug: string;
 	start_at: string;
