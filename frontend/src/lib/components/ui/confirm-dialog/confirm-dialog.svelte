@@ -27,14 +27,15 @@
 	<AlertDialogPrimitive.Portal>
 		<AlertDialogPrimitive.Overlay
 			class={cn(
-				'fixed inset-0 z-50 bg-black/50',
+				// Above popovers and dialogs: a confirmation is opened from inside them and must never hide behind.
+				'fixed inset-0 z-[70] bg-black/50',
 				'data-[state=open]:animate-in data-[state=closed]:animate-out',
 				'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
 			)}
 		/>
 		<AlertDialogPrimitive.Content
 			class={cn(
-				'fixed left-1/2 top-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2',
+				'fixed left-1/2 top-1/2 z-[70] grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2',
 				'gap-4 rounded-lg border bg-background p-6 shadow-lg sm:max-w-md',
 				'data-[state=open]:animate-in data-[state=closed]:animate-out',
 				'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
