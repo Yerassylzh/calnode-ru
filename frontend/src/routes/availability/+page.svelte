@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { currentUser } from '$lib/stores';
 	import { api, type AvailabilityRule, type AvailabilityOverride } from '$lib/api';
 	import { prefs, fmtDate } from '$lib/prefs';
@@ -14,7 +15,15 @@
 
 	const staffID = $derived(($currentUser?.is_admin && $page.url.searchParams.get('staff_id')) || $currentUser?.id || '');
 	const staffQuery = $derived('?' + new URLSearchParams({ user_id: staffID }));
-	let staffName = $state('');
+	let teamMembers: { id: string; name: string; email: string; archived?: boolean }[] = $state([]);
+
+	function pickMember(id: string | undefined) {
+		if (!id || id === staffID) return;
+		const url = new URL($page.url);
+		if (id === $currentUser?.id) url.searchParams.delete('staff_id');
+		else url.searchParams.set('staff_id', id);
+		goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+	}
 
 	const TIME_SLOTS: string[] = [];
 	for (let h = 0; h < 24; h++) {
@@ -275,17 +284,28 @@
 	}
 
 	onMount(() => {
-		loadRules();
-		loadOverrides();
-		if (staffID === $currentUser?.id) {
-			staffName = $currentUser.name;
-		} else if ($currentUser?.is_admin) {
+		if ($currentUser?.is_admin) {
 			api.get<{ id: string; name: string; email: string }[]>('/v1/users').then((members) => {
-				const member = members.find((item) => item.id === staffID);
-				staffName = member?.name || member?.email || '';
+				teamMembers = members;
 			}).catch(() => {});
 		}
 	});
+
+	// Reload whenever the selected member changes (initial load included).
+	$effect(() => {
+		const id = staffID;
+		if (!id) return;
+		rulesLoading = true;
+		overridesLoading = true;
+		loadRules();
+		loadOverrides();
+	});
+
+	const selectedName = $derived(
+		staffID === $currentUser?.id
+			? $currentUser?.name ?? ''
+			: (teamMembers.find((m) => m.id === staffID)?.name || teamMembers.find((m) => m.id === staffID)?.email || '')
+	);
 
 	// Catalog keys are camelCase; the API enum is snake_case.
 	const REASON_KEY: Record<OverrideReason, string> = { day_off: 'availability.reason.dayOff', out_of_office: 'availability.reason.outOfOffice', custom_hours: 'availability.reason.customHours' };
@@ -316,9 +336,29 @@
 
 <svelte:head><title>{$t('availability.pageTitle')}</title></svelte:head>
 
-<div class="mb-8">
-	<h1 class="text-2xl font-semibold tracking-tight">{$t('availability.heading')}</h1>
-	{#if staffName}<p class="mt-1 text-sm text-muted-foreground">{staffName}</p>{/if}
+<div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+	<div>
+		<h1 class="text-2xl font-semibold tracking-tight">{$t('availability.heading')}</h1>
+		{#if selectedName && !$currentUser?.is_admin}<p class="mt-1 text-sm text-muted-foreground">{selectedName}</p>{/if}
+	</div>
+	{#if $currentUser?.is_admin && teamMembers.length > 1}
+		<div class="space-y-1.5">
+			<span class="text-xs font-medium text-muted-foreground">{$t('availability.member')}</span>
+			<Select.Root type="single" value={staffID} onValueChange={pickMember}>
+				<Select.Trigger class="w-64">{selectedName || '…'}</Select.Trigger>
+				<Select.Content>
+					{#each teamMembers.filter((m) => !m.archived || m.id === staffID) as m (m.id)}
+						<Select.Item value={m.id} label={m.name || m.email}>
+							<span class="flex flex-col">
+								<span>{m.name || m.email}</span>
+								{#if m.name}<span class="text-xs text-muted-foreground">{m.email}</span>{/if}
+							</span>
+						</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+		</div>
+	{/if}
 </div>
 
 <!-- Weekly Hours -->

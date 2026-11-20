@@ -5,6 +5,7 @@ import type { CatalogEntry } from '../index';
 export const en: Record<string, CatalogEntry> = {
 	'availability.pageTitle': 'Working hours — Calnode',
 	'availability.heading': 'Working hours',
+	'availability.member': 'Team member',
 	'availability.subtitle': 'Set your weekly hours and block off specific dates.',
 	'availability.weeklyHours': 'Weekly Hours',
 	'availability.day.0': 'Sunday',
@@ -50,6 +51,7 @@ export const en: Record<string, CatalogEntry> = {
 export const ru: Record<string, CatalogEntry> = {
 	'availability.pageTitle': 'График работы — Calnode',
 	'availability.heading': 'График работы',
+	'availability.member': 'Сотрудник',
 	'availability.subtitle': 'Задайте свои еженедельные часы и заблокируйте отдельные даты.',
 	'availability.weeklyHours': 'Еженедельные часы',
 	'availability.day.0': 'Воскресенье',
