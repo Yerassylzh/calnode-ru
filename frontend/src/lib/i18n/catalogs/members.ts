@@ -89,8 +89,7 @@ export const en: Record<string, CatalogEntry> = {
 	'members.invites.resendNote': 'Resend mints a fresh link, resets the 7-day expiry, and re-emails it — the previous link stops working.',
 
 	'members.actions.makeMember': 'Make member',
-	'members.actions.makeAdmin': 'Make admin',
-	'members.actions.schedule': 'Schedule'
+	'members.actions.makeAdmin': 'Make admin'
 };
 
 export const ru: Record<string, CatalogEntry> = {
@@ -190,6 +189,5 @@ export const ru: Record<string, CatalogEntry> = {
 	'members.invites.resendNote': '«Отправить снова» создаёт новую ссылку, сбрасывает 7-дневный срок действия и повторно отправляет письмо — прежняя ссылка перестаёт работать.',
 
 	'members.actions.makeMember': 'Сделать участником',
-	'members.actions.makeAdmin': 'Сделать администратором',
-	'members.actions.schedule': 'Расписание'
+	'members.actions.makeAdmin': 'Сделать администратором'
 };
