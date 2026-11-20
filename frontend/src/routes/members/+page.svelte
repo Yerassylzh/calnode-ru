@@ -3,7 +3,8 @@
 	import { api, type TeamMember, type Invite, type UpcomingBooking } from '$lib/api';
 	import { currentUser } from '$lib/stores';
 	import { t, localeTag } from '$lib/i18n';
-	import { Button } from '$lib/components/ui/button';
+	import { base } from '$app/paths';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -484,6 +485,12 @@
 								{#if $currentUser?.is_admin}
 									<td class="px-4 py-3">
 										<div class="flex flex-wrap items-center justify-end gap-1">
+											{#if !m.archived}
+												<a
+													href="{base}/availability?{new URLSearchParams({ staff_id: m.id })}"
+													class={buttonVariants({ variant: 'ghost', size: 'sm' }) + ' h-7 text-xs'}
+												>{$t('members.actions.schedule')}</a>
+											{/if}
 											{#if m.archived}
 												{#if m.archived_by_name}
 													<span class="text-xs text-muted-foreground">{$t('members.archivedBy', { name: m.archived_by_name })}</span>
